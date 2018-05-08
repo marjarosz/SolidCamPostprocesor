@@ -1,0 +1,2738 @@
+;Machine 			HAAS
+;Type				3axis
+;Format GCODE
+;Autor postprocesora: Marek Jarosz marjarosz@gmail.com
+
+@init_post
+	;----------------------DEKLARACJA ZMIENNYCH GLOBALNYCH----------------------------------------------------------------------------------------------------------
+	;---------------------------------------------------------------------------------------------------------------------------------------------------------------
+	;-----------Zmienne globalne string-----------------------------------------------------------------------------------------------------------------------------
+	global string sFileStart sBeforeProgramNb sSC sEC sSP sTextBeforePartName sTextBeforeBuildRevision sTextBeforeDateFileCreate sCompanyName sTextBeforeCompanyName
+	global string sTextBeforePostprocesorRev sLicense sToolDefinictionMessage sStartProgramMessage sEndProgramMessage sStartCompMessage sEndCompMessage sRotateCoordinateON sRotateCoordinateOFF
+	global string sG73Msg sG81Msg sG82Msg sG83Msg sG84Msg sG74Msg sG76Msg sG77Msg sG85Msg sG86Msg sG87Msg sG88Msg sG89Msg sG84_PeckMsg sG74_PeckMsg sP133_Msg sG47Msg
+	global string sPRB_X_PLANE_Msg sPRB_Y_PLANE_Msg sPRB_Z_PLANE_Msg sPRB_X_BOSSMsg sPRB_Y_BOSSMsg sPRB_X_POCKETMsg sPRB_Y_POCKETMsg sPRB_X_POCKET_BOSSMsg sPRB_Y_POCKET_BOSSMsg
+	global string sPRB_HOLE_Msg sPRB_HOLE_Msg_3point sPRB_CYL_Msg sPRB_CYL_Msg_3point sPRB_HOLE_CYL_Msg sPRB_HOLE_CYL_Msg_3point sPRB_EXT_COR_Msg sPRB_INT_COR_Msg
+	global string sPRB_PB_Lenght_Error_Msg sPRB_PB_Restrict_ErrorMsg sPRB_HOLE_Dim_ErrorMsg sPRB_Y_axis_Angle_Msg sPRB_X_axis_Angle_Msg sPRB_Z_axis_Angle_Msg sToolHolderMsg sToolHeightMsg
+	global string sCharToReplace sCharReplace sRotation_angleNextOperation 
+	global string sJobList<<999>>
+	;-----------Zmienne globalne numeric----------------------------------------------------------------------------------------------------------
+	global numeric nPostprocesorRev
+	global numeric nProbeFeedRate nProbeX nProbeY nProbeZ nXrotPM nYrotPM nPrevJobStartLevel
+	global numeric nXTempProbe yTempProbe zTempProbe nRotate_XNextOperation nRotate_YNextOperation
+	;-----------Zmienne globalne integer-----------------------------------------------------------------------------------------------------------
+	global integer iDateFormat iWorkoffset iWorkoffsetP iActualWorkOffset iActualSpinrate iActualToolDirection iActualCollantFlood iPositionPrograming iCompensationMode iMachinePlan
+	global integer iMoveType iDrillmode iNumberCharToGrav iProbeWorkoffset iProbeAngleCorner iProbeAngleCornerTemp iProbeAngleCornerNextOperation
+	global integer iBlkNumList<<999>> iJobListCounter
+	
+	;-----------Zmienne globalne logical-------------------------------------------------------------------------------------------------------------
+	global logical lAAG_MQL_ON lTAB_ON lCompensationMes lAfterToolDef lIsStartJob lToolChanged lUsedMCO lCustomPeckDrill lProbeStart lProbeInSpindle lProbeProtection lFirstMoveControlMachine lUseRotateCoordinate lHomeNumberChange lFirstJob lProbeMoveBlock lG68_All_Operation
+
+
+
+    ; GPPL variables
+    numeric_def_f   = '5.3'
+    integer_def_f   = '5.0(p)'
+    gcode_f         = '2/2.0(p)'
+    mcode_f         = '2/2.0(p)'
+    xpos_f          = '5.3'
+    ypos_f          = '5.3'
+    zpos_f          = '5.3'
+    feed_f          = '4.3'
+    blknum_f        = '5.0(p)'
+    blknum_gen      = true
+	;wywolanie opcji uzytkowika
+	call @usr_options
+	
+	;trace "all":5
+	;trace "@arc":5
+	;trace "@drill @move_object":5
+	;trace "@start_probe @move_prb @line_prb @prb_cyc_xyz_plan @end_probe @prb_cyc_bos_pckt @usr_prb_bos_x @usr_prb_bos_y @usr_prb_pocket_x @usr_prb_pocket_y @usr_prb_pocket_boss_x @usr_prb_pocket_boss_y @prb_cyc_hol_cyl @prb_cyc_cor @prb_cyc_angle":5
+	;trace "@start_mach_ctrl @start_obj_act @move_object @end_obj_act @mco_message @machine_stop @dwell @machine_opt_stop @chip_convery @door @unload_tool @cool_flood @spin @spindle_orient":5
+endp
+
+@usr_options
+
+	;----------tych wartosci nie zmieniac----------------------------------------------------------------------------------------------------------------------
+	iWorkoffsetP					= 0														;type:numeric - numer P dla G154
+	lCompensationMes 				= false
+	lAfterToolDef			   	    = false													;type:logical - czy zostala wywolana procedura after_tool-def
+	lIsStartJob						= false													;type:logical - czy rozpoczeto operacje
+	iActualCollantFlood				= 0														;type:integer - aktualne chlodziwo 0 - wylaczone, 1 - wlaczone zalewanie 2- wlaczone przez wrzeciono
+	lAAG_MQL_ON						= false													;type:logical - automatyczny pistolet pneumatyczny / smarowanie iloscia minimalna wlaczone / wylaczone 
+	lTAB_ON							= false													;type:logical - przedmuch przez narzedzie
+	lToolChanged					= false													;type:logical - czy nastapila zmiana narzedzia
+	iPositionPrograming				= 90													;type:integer -	typ pozycjonowania G90 lub G91
+	iCompensationMode				= 40													;type:integer - typ kompenascji srednicy G40 G41 G42
+	iMachinePlan					= 99999													;type:integer - plszczyzna obrubki G17 G18 G19
+	lProbeStart						= false													;type:logical - czy start sondy
+	lProbeInSpindle					= false													;type:logical - czy sonda jest we wrzecionie
+	lProbeProtection				= false													;type:logical - sonda w trybie cronionym
+	lUsedMCO						= false
+	lCustomPeckDrill				= false
+	lFirstMoveControlMachine		= false	
+	iProbeAngleCorner				= 0 													;type:integer - ktory naroznik 1 DP, 2-DL 3-GL 4-GP	
+	iProbeAngleCornerTemp			= 0
+	nXrotPM							= 0														;type:numeric - pink obrotu ukladu wsp X
+	nYrotPM							= 0														;type:numeric - pink obrotu ukladu wsp Y
+	lUseRotateCoordinate			= false													;type:logical - wlaczona rotacja ukladu wsp
+	lHomeNumberChange				= false													;type:logical - czy jest zmiana bazy
+	lFirstJob						= true													;type:logical - pierwsza operacja
+	nXTempProbe						=0
+	yTempProbe						=0
+	zTempProbe						=0
+	lProbeMoveBlock					=false
+	iNumberCharToGrav				=0
+	lG68_All_Operation				=false
+	iProbeAngleCornerNextOperation = 0
+	sRotation_angleNextOperation = '0'
+	nRotate_XNextOperation =0
+	nRotate_YNextOperation =0
+	iJobListCounter = 1
+	;---------wersja postprocesora------------------------------------------------------------------------------------------------------------------------------
+	nPostprocesorRev = 1.24
+	;--------opcje do generowania numeracji linni---------------------------------------------------------------------------------------------------------------
+	blknum_letter					= 'N'													;type:string - znak przed numerem bloku
+	blknum							= 10 													;type:integer - numer bloku od ktorej zaczyna numeracje
+	blknum_delta					= 2												  		;type:integer - o ile zwiekszac numer bloku
+	blknum_max						= 9999999
+	;--------komentrze------------------------------------------------------------------------------------------------------------------------------------------
+	sSC								= '('													;type:string - rozpoczecie komentarza - dla HAAS ( z spacja na poczatku
+	sEC								= ')'													;type:string - zakonczenie komentarza - dla HAAS )
+	sSP								= ' '													;tpe:string  - spacja
+	;--------start pliku----------------------------------------------------------------------------------------------------------------------------------------
+	sFileStart						='%'													;type:string - znak rozpoczecia i zakonczenia pliku, dla HAAS %
+	sBeforeProgramNb				='o'													;type:string - znak przed numerem programu, dla HAAS o 
+	sTextBeforePartName				='Nazwa czesci: '										;type:string - teks przed nazwa czesci
+	sTextBeforeBuildRevision		='Wersja SOLIDCAM: '									;type:string - teks przed wersja programu build revision
+	sTextBeforeDateFileCreate		='Data wygenerowania pliku: '							;type:string - teks przed data wygenerowania pliku
+	sTextBeforeCompanyName			='Firma: '												;type:string - tekst przed nazwa firmy
+	sCompanyName					='PPHU LARISA'											;type:string - nazwa firmy
+	sTextBeforePostprocesorRev		='Wersja postprocesora: '								;type:string - tekstprzed wersja postprocesora
+	sLicense						='Wylacznie na uzytek PPHU Larisa'						;type:string - licencja
+	iDateFormat						=3														;type:integer - format daty 1-domyslny SolidCam, 2 - DD-MM-YYYY, 3- DD-Nazwa miesiaca-YYYY, 4-YYYY-MM-DD
+	;--------tool definiction-------------------------------------------------------------------------------------------------------------------------------------
+	sToolDefinictionMessage 		='------Lista narzedzi--------'							;type:string - wiadomosc przed defibicj narzedzi
+	;--------program start----------------------------------------------------------------------------------------------------------------------------------------
+	sStartProgramMessage 			='------Start programu--------'							;type:string - wiadomosc przed startem programu
+	;--------Koniec programu--------------------------------------------------------------------------------------------------------------------------------------
+	sEndProgramMessage				='------Koniec programu-------'							;type:string - wiadomoc na koniec programu
+	;--------Kompensacja------------------------------------------------------------------------------------------------------------------------------------------
+	sStartCompMessage				='WLACZENIE KOMPENSACJI'								;type:string - wiadomosc przed wlaczeniem kompensacji nazredzia
+	sEndCompMessage					='WYLACZENIE KOMPENSACJI'								;type:string - wiadomosc przed wylaczeniem kompensacji nazredzia
+	;--------Rotacja----------------------------------------------------------------------------------------------------------------------------------------------
+	sRotateCoordinateON 			='Rotacja ukladu wlaczona'
+	sRotateCoordinateOFF			='Rotacja ukladu wylaczona'
+	sToolHolderMsg					='Oprawka:'
+	sToolHeightMsg					='Poza oprawka:'
+	;--------Cykle wiercenia - wiadomosci komentarza przed cyklem, ''-brak komentarza 		 type:string
+	sG73Msg							='Cykl wysokoobrotowe nawiercanie przecyzyjne'
+	sG81Msg							='Cykl standardowe nawiercanie'
+	sG82Msg							='Cykl nawiercanie wstepne z przerwa czasowa'
+	sG83Msg							='Cykl normalne nawiercanie precyzyjne'
+	sG84Msg							='Cykl gwintowania - PRAWY'
+	sG74Msg							='Cykl gwintowania zwrotnego - LEWY'
+	sG76Msg							='Cykl wytaczania precyzyjnego'
+	sG77Msg							='Cykl wytaczania zwrotnego'
+	sG85Msg							='Cykl standardowy wytaczania'
+	sG86Msg							='Cykl wytaczanie i zatrzymanie'
+	sG87Msg							='Cykl wytaczanie i wysofanie reczne'
+	sG88Msg							='Cykl wytaczanie - przerwa - wycofanie reczne'
+	sG89Msg							='Cykl wytaczanie - przerwa - wycofanie'
+	sG84_PeckMsg					='Cykl gwintowania wielokrotnego - PRAWY'
+	sG74_PeckMsg					='Cykl gwintowania wielokrotnego - LEWY'
+	sP133_Msg						='Parametr 133 musi byc wlaczony'
+	sG47Msg							='Cykl grawerowania'
+	;-------Cykle sondy - wiadomosc komentarza przed cyklem , ''-brak komentarza
+	sPRB_X_PLANE_Msg 				='Pomiar Singlepoint X'
+	sPRB_Y_PLANE_Msg				='Pomiar Singlepoint Y'
+	sPRB_Z_PLANE_Msg				='Pomiar Singlepoint Z'
+	sPRB_X_BOSSMsg					='Pomiar wyspa X'
+	sPRB_Y_BOSSMsg					='Pomiar wyspa Y'
+	sPRB_X_POCKETMsg				='Pomiar kieszen X'
+	sPRB_Y_POCKETMsg				='Pomiar kieszen Y'
+	sPRB_X_POCKET_BOSSMsg			='Pomiar kieszen wyspa X'
+	sPRB_Y_POCKET_BOSSMsg			='Pomiar kieszen wyspa Y'
+	sPRB_HOLE_Msg					='Pomiar srednicy otwor 4 punkty'
+	sPRB_HOLE_Msg_3point			='Pomiar srednicy otwor 3 punkty'
+	sPRB_CYL_Msg					='Pomiar srednicy cylinder 4 punkty'
+	sPRB_CYL_Msg_3point				='Pomiar srednicy cylinder 3 punkty'
+	sPRB_HOLE_CYL_Msg				='Pomiar srednica wyspa 4 punkty'
+	sPRB_HOLE_CYL_Msg_3point		='Pomiar srednica wyspa 3 punkty'
+	sPRB_EXT_COR_Msg				='Znajdz zewnetrzny naroznik'
+	sPRB_INT_COR_Msg				='Znajdz wewnetrzny naroznik'
+	sPRB_Y_axis_Angle_Msg			='Pomiar kata w osi X'
+	sPRB_X_axis_Angle_Msg			='Pomiar kata w osi Y'
+	sPRB_Z_axis_Angle_Msg			='Pomiar kata w osi Z'
+	;--------Wiadomosci bledow-----------------------------------------------------------------------
+	sPRB_PB_Restrict_ErrorMsg		='Wartosc RetractDist jest mniejsza lub rowna promieniowi kulki'
+	sPRB_PB_Lenght_Error_Msg		='Brak zdefiniowanej dlugosci'
+	sPRB_HOLE_Dim_ErrorMsg			='Zbyt mala srednica do zmierzenia'	
+	;--------Znaki do usunieecia z wiadomosci komentazry itp------------------------------------------
+	sCharToReplace = 'ĄąĆćĘęŁłŃńÓóŻżŹź'
+	sCharReplace   = 'AaCcEeLlNnOoZzZz'
+endp
+
+;Procedura start_of_file - pierwsza procedura, start pliku nc
+@start_of_file
+
+	if n_Chip_Clear_Time == 0 then
+		n_Chip_Clear_Time = 0.5
+	endif
+	
+	;znak rozpoczecia pliku
+	{,sFileStart}
+	;numer programu oraz jego nazwa  w komentarzu
+	if g_file_name != '.NC' then
+		{nl, sBeforeProgramNb program_number sSP sSC g_file_name sEC }
+	else
+		{nl, sBeforeProgramNb program_number sSP sSC part_name sEC }
+	endif
+    ;nazwa czesci
+	{nb, sSC sTextBeforePartName part_name sEC }
+	;maszyna
+	{nb, sSC 'Obrabiarka: ' VMID_file sEC}
+	;wersja solidcam
+	{nb, sSC sTextBeforeBuildRevision build_revision sEC }
+	;data i godzina wygenerowania pliku
+	call @usr_date_convert
+	;nazwa firmy
+	{nb, sSC sTextBeforeCompanyName sCompanyName sEC }
+	;wersja postprocesora
+	{nb, sSC sTextBeforePostprocesorRev nPostprocesorRev sEC }
+	{nb, sSC 'Autor postprocesora:' sEC }
+	{nb, sSC 'Marek Jarosz marjarosz@gmail.com' sEC }
+	{nb, sSC sLicense sEC}
+	call @usr_check_message(('------Przygotowka-----------'), (TRUE))
+	{nb,'(Wymiary: X=' stock_x ' Y='stock_y ' Z='stock_z')'}
+	;wywolanie procedury przed definicja narzedzi
+	call @usr_before_tool_def
+		;stock_x:224.000 stock_y:40.000 stock_z:60.000
+endp
+
+
+
+;procedura def_tool
+@def_tool
+
+	call @usr_tool_information((1))
+	skipline = true
+	
+endp
+
+@usr_tool_information(integer iProcedureId)
+local string sToolInfo
+	;iProcedureId - z ktorej procedury jest wwywolywana
+	;1- def_tool, 2- change_tool
+	;Czy narzedzie jest opisane
+	if tool_message == '' then
+		
+		if tool_type eq 0 then
+			;drill
+			sToolInfo = 'Wiertlo'
+		elseif tool_type eq 1 then
+			;bullnose
+			sToolInfo = 'Frez z promieniem naroza'
+		elseif tool_type eq 2 then
+			;end_mill
+			sToolInfo = 'Frez palcowy'
+		elseif tool_type eq 3 then
+			;iscar_plh
+			sToolInfo = 'iscar_plh'
+		elseif tool_type eq 4 then
+			;drill_shaped
+			sToolInfo = 'Wiertło ksztaltowe'			
+		elseif tool_type eq 5 then
+			;rough_mill_shaped
+			sToolInfo = 'rough_mill_shaped'			
+		elseif tool_type eq 6 then
+			;end_mill_shaped
+			sToolInfo = 'end_mill_shaped'			
+		elseif tool_type eq 7 then
+			;slot_mill
+			sToolInfo = 'Frez do rowkow'			
+		elseif tool_type eq 8 then
+			;lollipop_mill
+			sToolInfo = 'lollipop_mill'			
+		elseif tool_type eq 9 then
+			;taper_mill
+			sToolInfo = 'taper_mill'
+		elseif tool_type eq 10 then
+			;chamfer_drill
+			sToolInfo = 'Frez do fazowania'
+		elseif tool_type eq 11 then
+			;dove_mill
+			sToolInfo = 'dove_mill'
+		elseif tool_type eq 12 then
+			;tap_mill
+			sToolInfo = 'Gwintownik'
+		elseif tool_type eq 13 then
+			;thread_mill
+			sToolInfo = 'Frez do gwintow'
+		elseif tool_type eq 14 then
+			;thread_taper_mill
+			sToolInfo = 'thread_taper_mill'
+		elseif tool_type eq 15 then
+			;ball_nose
+			sToolInfo = 'Frez kulisty'
+		elseif tool_type eq 16 then
+			;reamer_mill
+			sToolInfo = 'Rozwiertak'
+		elseif tool_type eq 17 then
+			;bore
+			sToolInfo = 'Wytaczadlo'
+		elseif tool_type eq 18 then
+			;center_drill
+			sToolInfo = 'center_drill'
+		elseif tool_type eq 19 then
+			;engraving_mill
+			sToolInfo = 'Frez do grawerowania'
+		elseif tool_type eq 20 then
+			;face_mill
+			sToolInfo = 'Glowica'
+		elseif tool_type eq 21 then
+			;spot_drill
+			sToolInfo = 'spot_drill'
+		elseif tool_type eq 22 then
+			;tool_probe
+			sToolInfo = 'Sonda'
+		else
+			sToolInfo ='Nieznane narzedzie'
+		endif
+		
+	else
+		;narzedzie jest opisane 
+		sToolInfo = tool_message
+	endif
+	if iProcedureId eq 1 then
+		;wywolanie z procedury def_tool
+		if tool_message == '' then
+			{nb, sSC 'T' tool_number '-' sToolInfo ' DIA ' (tool_offset*2) sEC }
+		else
+			{nb, sSC 'T' tool_number '-'sToolInfo sEC }
+		endif
+		if Tool_list_type eq 1 or Tool_list_type eq 3 then
+			{nb, '(--' sToolHeightMsg ' ' tool_length ')'}
+		endif
+		if Tool_list_type eq 2 or Tool_list_type eq 3 then
+			{nb, '(--' sToolHolderMsg ' ' holder_name ')'}
+		endif
+		
+
+		
+	elseif iProcedureId eq 2 then
+		;wywolanie z procedury change_tool
+		if tool_message == '' then
+			{sSC  sToolInfo ' DIA ' (tool_offset*2) sEC }
+		else
+			call @usr_check_message(sToolInfo, (FALSE))
+		endif
+	endif
+	
+	if iProcedureId eq 1 then
+		;wywolane z procedury def_tool
+		;pozostale komentarze narzedzia
+		if msg_mill_tool1 != '' then
+			{nb, sSC '---' msg_mill_tool1 sEC }
+		endif
+		 
+		if msg_mill_tool2 != '' then
+			{nb, sSC '---' msg_mill_tool2 sEC }
+		endif
+		 
+		if msg_mill_tool3 != '' then
+			{nb, sSC '---' msg_mill_tool3 sEC }
+		endif
+		 
+		if msg_mill_tool4 != '' then
+			{nb, sSC '---' msg_mill_tool4 sEC }
+		endif
+		 
+		if msg_mill_tool5 != '' then
+			{nb, sSC '---' msg_mill_tool5 sEC }
+		endif
+	endif
+endp
+;procedura absolute_mode pozycjonowanie bezwzgledne
+@absolute_mode
+	;sprawdza czy juz nie zostala wywolana procedura po zmianie narzedzi, 
+	;jezeli nie to ja wywoluje i ustawia wartosc na true, wiecej razy jej nie wywola
+	if lAfterToolDef == false
+		call @usr_after_tool_def ;wywolanie procedury po definicji nazredzi
+		lAfterToolDef = true;
+	endif
+	;dla HAAS pozycjonowanie bezwzgledne G90
+	iPositionPrograming = 90
+	{'G'iPositionPrograming, ' '}	
+	skipline = false;
+endp
+;procedura relative_mode
+@relative_mode
+	iPositionPrograming = 91
+	{nb, 'G'iPositionPrograming, ' '}
+	skipline = FALSE
+endp
+
+;procedura machine_plane - plaszczyzna obrubki
+@machine_plane
+	call @usr_machine_plan
+	{['G'iMachinePlan, ' ']}
+	skipline = false;
+endp
+@usr_machine_plan
+	;w HAAS 3x mamy trzy plaszczyzny obrubki XY-G17 YZ-G18 ZX-G19
+    if machine_plane eq XY
+        iMachinePlan = 17
+    endif
+    if machine_plane eq YZ
+        iMachinePlan = 18
+    endif
+    if machine_plane eq ZX
+        iMachinePlan = 19
+    endif
+endp
+;procedura startu programu
+@start_program
+
+	;wylaczamy kompensacje srednicy narzedzai, ustawiamy side na COMP_OFF
+	side = COMP_OFF
+	call @compensation
+	call @usr_tool_lenhgth_off
+	;wylaczamy cykl wiercenia
+	call @end_drill
+	call @usr_inch_metric_mode
+	{'G00 '}
+	if List_of_Job eq true then
+		{nb, '#33=1'}
+	endif
+endp
+
+@usr_inch_metric_mode
+	if inch_system eq 0 then
+		{'G21 '}
+	else
+		{'G20 '}
+	endif
+endp
+
+@usr_tool_lenhgth_off
+	{'G49 '}
+endp
+;procedura do kompensacji srednicy
+@compensation
+	
+	;jezeli offset_number jest 0 to nie mamy wybranego naredzia - wstaw  G40 koniec kompensacji nazredzia	
+	if offset_number eq 0 then
+		iCompensationMode = 40
+		{'G'iCompensationMode, ' '}
+		skipline = false
+		return
+	endif
+	
+	;kompensaca w lewo G41
+	if side eq COMP_LEFT then
+		lCompensationMes = true
+		iCompensationMode = 41
+		{nb, sSC sStartCompMessage ' G'iCompensationMode sEC}
+		skipline =true
+		{nb, 'G'iCompensationMode, ' ','D'offset_number, ' '}
+		lCompensationMes = true
+	endif
+	;kompensacja w prawo 42
+	if side eq COMP_RIGHT then
+		lCompensationMes = true
+		iCompensationMode = 42
+		{nb, sSC sStartCompMessage ' G'iCompensationMode sEC}
+		skipline = true
+		{nb, 'G'iCompensationMode, ' ','D'offset_number, ' '}
+		lCompensationMes = true
+
+	endif
+	;wylaczeie kompensacji G40
+	if side eq COMP_OFF then
+		if lCompensationMes eq true
+				{nb, sSC sEndCompMessage ' G'iCompensationMode sEC}
+				skipline = true
+		endif
+		iCompensationMode = 40
+		
+		{nb, 'G'iCompensationMode, ' '}
+		;jezeli byla wlaczona kompensacja to wyswietl informacje o wylaczenie
+
+		lCompensationMes = false
+	endif
+	skipline = false
+endp
+;koniec cyklu wiercenia G80
+@end_drill 
+	;gcode = 80
+	call @usr_Chlip_Clear
+	{nb, 'G80', ' '}
+	E_ReverseRotationSpindle = 0
+	
+endp
+
+;procedura setup
+@setup
+endp
+;procedura tmatrix - zastosowanie do wiecej niz 3 osi
+@tmatrix 
+endp
+
+;procedura home_number
+@home_number
+	
+	;czy nastepuje zmiana bazy
+	if iActualWorkOffset != home_number  then
+		lHomeNumberChange = true
+	else
+		lHomeNumberChange = false
+	endif
+
+	iActualWorkOffset = home_number
+	;HAAS dysponuje korekcjami roboczymi G54-G59, G110-G129, G154 P1-P99
+	;Dla SONDY podczas bazowania		 S1-S6	  S110-S129	 S154.01-154.99
+	
+	;h0me_number jest od 1 do 6 ustawiamy aby bylo G54-G59 
+	if home_number <= 6 then
+		iWorkoffset = 53+home_number
+		iProbeWorkoffset = home_number
+		iWorkoffsetP = 0
+	;home_number jest w przedziale od 7-26 G110-G129
+	elseif home_number >=7 and home_number <=26 then
+		iWorkoffset = 103+home_number
+		iProbeWorkoffset = iWorkoffset
+		iWorkoffsetP = 0
+	;jezeli home_number jest numerem korekcji roboczej 54-59
+	elseif home_number >=54 and home_number <=59 then
+		iWorkoffset = home_number
+		iProbeWorkoffset = home_number - 53
+		iWorkoffsetP = 0
+	;jezeli home_number jest numerem korekcji roboczej 110-129
+	elseif home_number >=110 and home_number <=129 then
+		iWorkoffset = home_number
+		iProbeWorkoffset = home_number
+		iWorkoffsetP = 0
+	;jezeli home_number jest numerem korekcji 154
+	elseif home_number >= 154 and home_number <= 252 then
+		iWorkoffset = 154
+		iProbeWorkoffset = 154
+		iWorkoffsetP = home_number-153
+	else
+		iWorkoffset = home_number
+		iProbeWorkoffset = 0
+	endif
+	if lIsStartJob == true then
+		{'G'iWorkoffset, ' '}
+		if iWorkoffsetP > 0 then
+			{'P' iWorkoffsetP ' '}
+		endif
+		skipline = false
+	endif
+	
+endp
+;procedura change_tool -zmiana narzedzai np T1 M06 gdzie T1 -narzedzie numer 1, M06 - funkcja m do zmiany narzedzia
+@change_tool
+
+	;nie jest to pierwsze narzedzie
+	if first_tool == false then
+		;wylaczeniechlodzenia
+		call @usr_coolant_OFF
+			skipline = true
+			;jezeli we wrzecionie jest sonda 
+			
+			;jezeli jest sonda we wrzecionie
+			if lProbeInSpindle then
+				zpos = zpos + nProbeZSU
+				call @move_prb
+				
+				{nb, 'G65 P9833 (Sonda wylaczona)' }
+				lProbeInSpindle = false
+				lProbeProtection = false
+			endif
+			{nb, 'G91 G28 Z0 M05'}
+			iActualSpinrate = 0
+			{nb, 'M01'}
+			{nb, 'G90 G17 G40 G49 G80 G00'}
+	else
+		iActualCollantFlood = 0
+		lAAG_MQL_ON = 0
+		lTAB_ON	= 0
+	endif
+	
+	
+	skipline = true
+	iBlkNumList<<iJobListCounter>>=blknum
+	{nb, 'T'tool_number, ' ','M06', ' '}
+	
+	;wstawiamy informacje o narzedziu z procedury usr_options z argumentem 2
+	call @usr_tool_information((2))
+	lToolChanged = true
+	;sprawdzam czy narzedzie nie jest sonda, jezeli tak to ustawia lProbeStart na true i lProbeInSpindle na true
+	if tool_type eq tool_probe then
+		lProbeStart = true
+		lProbeInSpindle = true
+	else
+		lProbeInSpindle = false
+	endif
+	
+	;Magazyn narzedzi SMTP
+	
+	if l_SMTP == 1 then
+		if tool_number != next_tool_number then
+			{nb, 'T'next_tool_number}
+		endif
+	endif
+	
+endp
+
+@offset_change
+endp
+
+;procedura rozpoczecia operacji
+@start_of_job 
+	
+		;nie jest to pierwsza operacja , zostala zmieniona baza, nie zmienione narzedzie
+		if lHomeNumberChange eq 1 and lToolChanged eq false and  lFirstJob eq false then
+			;{nb, ['G'gcode' '], ['Z'nPrevJobStartLevel' ']}
+		{nb, '(Zmiana bazy)'}
+		endif
+	
+	lIsStartJob = true
+	lFirstJob = false
+	call @usr_machine_plan
+	skipline = true
+
+	;Jak clearance level operacji jest wiekszy od ustawionego dla czesci
+	if index_job > 1 then
+		if lToolChanged eq false and lUsedMCO eq false and lHomeNumberChange eq 0 then
+		
+			if znext > zpos
+			{nb, ['G'gcode' '],'Z', znext}
+			endif
+		endif
+	endif
+	lUsedMCO = false
+	;nazwa operacji
+	{nb}
+	
+	;ewentualna zmiana nazredzia
+	
+	if List_of_Job eq true then
+		if lToolChanged eq false and lFirstJob eq false then
+		iBlkNumList<<iJobListCounter>>=blknum
+		{nb, 'IF [#3026 EQ 'tool_number'] GOTO' (blknum+blknum_delta)}
+		{nb, 'T'tool_number, ' M06'}
+		endif
+	endif
+	
+	call @usr_check_message (job_name,(TRUE))
+	if List_of_Job eq true then
+		{nb, '#33=1'}
+	endif
+	sJobList<<iJobListCounter>> = job_name + ' - T' + tostr(tool_number:'5.0(n)')
+	iJobListCounter = iJobListCounter+1
+	call @usr_check_message (msg,(TRUE))
+	call @usr_explode_string(M_macre_before_job, (';'))
+	;ustawienie obrotow i kierunku wrzeciona oraz chlodiwa
+	call @usr_coolant
+	call @usr_spindle_def
+	
+	skipline = true
+	{nb}
+	call @usr_height_compensation
+	if G187_available == 1 then
+		call @usr_G187_use
+	endif
+	;rotacja ukladu wsp
+	call @usr_rotate_coordinate_on
+	
+
+endp
+
+;Procedura dla G187
+@usr_G187_use
+	skipline = true
+	{nb, 'G187'}
+	if lUse_G187 == 1 then
+		if iG187_P !=0 then
+		{' P'iG187_P}
+		endif
+		
+		if nG187_E !=0 then
+		{' E'nG187_E}
+		endif
+	endif
+	skipline = true
+	
+endp
+
+
+;procedura m_feed_spin 
+@m_feed_spin 
+;pierwsze parametry wrzeciona wywolane zostaly z start of job
+	if lIsStartJob eq false then 
+		call @usr_spindle_def
+	endif
+endp
+;procedura job_plane
+@job_plane
+
+endp
+;procedura message
+@message
+
+	;call @usr_check_message(message,(TRUE))
+	
+
+endp
+
+@usr_explode_string(string s_to_explode, string s_separator)
+
+		local integer s_count s_instr s_instr_bef
+		local string last_str
+		s_count = strlen(s_to_explode)
+		s_instr_bef = 1
+		s_instr = instr(s_to_explode, s_separator)
+		if s_count > 0 then		
+			while s_instr > 0 
+					
+					{nb, substr(s_to_explode,s_instr_bef, (s_instr-s_instr_bef))}
+					s_instr_bef = s_instr+1
+					s_instr = instr(s_to_explode, s_separator, (s_instr+1))
+								
+			endw		
+			last_str = right(s_to_explode, (s_count-(s_instr_bef-1)))		
+			if last_str != '' then
+				{nb, last_str}
+			endif
+		endif
+endp
+
+;procedura tool_path_info
+@tool_path_info
+
+endp
+
+;procedura posuwu szybkiego G00
+@rapid_move
+
+	if lProbeProtection eq 1 then
+		return
+	endif
+	
+	skipline = true
+	gcode = 0
+	local logical homechange
+	homechange = false
+	
+	if lIsStartJob then
+		
+			if lHomeNumberChange eq 1 and lToolChanged eq false and  lFirstJob eq false then
+				homechange = true
+			endif
+
+			
+			{nb, 'G'gcode' '}
+			call @home_number
+			{'G'iPositionPrograming' '}
+			if lUseRotateCoordinate eq 0 then
+				{'G'iMachinePlan' '}
+			endif
+			
+			;zmiana bazy 
+			if homechange eq true then
+				if Move_Z_Change_home > 0 then
+					{'Z' , (job_start_level+Move_Z_Change_home), ' '}
+				else
+					{['Z'job_start_level' ']}
+				endif
+				
+				skipline = true
+				{nb, ['G'gcode' ']}
+			endif
+						
+			{['X'xpos' '], ['Y'ypos' ']}
+			change(gcode) = false
+			
+		
+		skipline = true
+			{nb, ['G'gcode' '], ['Z'zpos' ']}
+			lToolChanged = false
+		
+		
+		lIsStartJob = false
+	else
+		if change (xpos) or change(ypos) then
+			{nb, ['G'gcode' '], ['X'xpos' '], ['Y'ypos' ']}
+		endif
+		
+		if change (zpos) then
+			{nb, ['G'gcode' '], ['Z'zpos' ']}
+		endif
+	endif
+	
+	skipline = true
+
+endp
+
+;procedura posuwu interpolacji liniowej G01
+@line
+    gcode = 1
+   {nb, ['G'gcode' '],['G'iMachinePlan' '],['G'iPositionPrograming' '],['X'xpos' '],['Y'ypos' '],['Z'zpos' '],['F'feed' '] }
+   change(iMachinePlan)=false
+
+endp
+
+;procedura interpolacji kulistej
+@arc 
+	;jaka iterpolacja
+	if arc_direction eq CCW then
+	;interpolacja w lewo
+		gcode = 3
+	else
+		;w prawo
+		gcode = 2
+	endif
+	
+	if arc_plane eq XY
+        iMachinePlan = 17
+    endif
+    if arc_plane eq ZX
+        iMachinePlan = 18
+    endif
+    if arc_plane eq YZ
+        iMachinePlan = 19
+    endif
+	
+	
+	{nb, ['G'gcode' '],['G'iMachinePlan' '], ['G'iPositionPrograming' '], ['X'xpos' '],['Y'ypos' '],['Z'zpos' ']}
+	;plaszczyzna XY 
+	if arc_plane eq XY then
+		{'I'xcenter_rel ' ', 'J'ycenter_rel ' '}
+	endif
+	;plaszczyzna ZX
+	if arc_plane eq ZX
+		{'I'xcenter_rel ' ', 'K'zcenter_rel ' '}
+	endif
+	;plaszczyzna YZ
+	if arc_plane eq YZ
+		{'J'ycenter_rel ' ', 'K'zcenter_rel ' '}
+	endif
+	{['F'feed' ']}
+	change(iMachinePlan)=false
+	
+endp
+
+@arc_yz 
+	call @arc
+endp
+
+@arc_zx
+	call @arc
+endp
+
+;koniec operaci
+@end_of_job
+		call @usr_rotate_coordinate_off
+		
+		nPrevJobStartLevel = job_start_level
+		call @usr_explode_string(M_macre_after_job, (';'))
+
+endp
+
+;koniec programu
+@end_program
+	;wylaczeni chlodziwa jezeli wlaczone
+	call @usr_coolant_OFF
+	if lProbeInSpindle then
+		zpos = nProbeZ + nProbeZSU
+		xpos = nProbeX
+		ypos = nProbeY
+		call @move_prb
+		{nb, 'G65 P9833 (Sonda wylaczona)' }
+	endif
+
+	;Tryb relatywny, zatrzymanie obrotow
+	call @relative_mode
+	{'G28 Z0 M05'}
+	;Dojazd stolem do drzwi wspolrzedne maszyny G53
+	skipline = true
+	{nb, 'G00 '}
+	call @absolute_mode
+	{'G53 X',X_end_program ' Y', Y_end_program} ; wspolrzedne maszyny
+	skipline = true
+	
+	if List_of_Job eq true then
+		local integer actlistnb
+		actlistnb = 1
+		
+		while actlistnb < iJobListCounter
+		{nb, '('sJobList<<actlistnb>>')'}
+		{nb, 'IF [#33 EQ #0] GOTO' iBlkNumList<<actlistnb>>}
+		actlistnb = actlistnb+1
+		endw
+	endif
+	{nb, 'M30'}
+	
+	if sEndProgramMessage != '' then
+		call @usr_check_message(sEndProgramMessage,(TRUE))
+	endif
+	
+endp
+
+@end_of_file
+	{nl, sFileStart}
+endp
+
+
+;procedury wiercenia 
+
+;cykl standardowy nawiercania G81
+@usr_drill_81
+
+
+		iDrillmode = 81
+		call @usr_check_message(sG81Msg,(TRUE) )
+        {nb,'G98 G'iDrillmode ' X'xpos' Y'ypos' Z'drill_lower_z' R'drill_upper_z' F'feed ' ' ['E'E_ReverseRotationSpindle]}
+endp 
+
+;wysokoobrotowy cykl nawiercania precyzyjnego G73
+@usr_drill_73
+		iDrillmode = 73
+        if P_Dwell eq 0 then
+			;jezeli przerwa czasowa jest 0 to jej nie wstawiaj
+            change(P_Dwell) = false
+        endif
+		call @usr_check_message(sG73Msg,(TRUE))
+		
+		;brak Q I J K uzyj innego cyklu wiecenia
+		if I_FirstPeck eq 0 and K_MinimumDepth eq 0 and J_ReduceAmount eq 0 and Q_Peck eq 0 then
+			if P_Dwell eq 0 then
+			;brak przerwy czasowej cykl G81
+				call @usr_drill_81
+			else
+				call @usr_drill_82
+			endif
+		;Uzycie adresu Q i K
+        elseif I_FirstPeck eq 0 and K_MinimumDepth != 0 then
+            {nb, 'G98 G'iDrillmode ' X'xpos' Y'ypos' Z'drill_lower_z' R'drill_upper_z' Q'Q_Peck' K'K_MinimumDepth,[' P'P_Dwell],' F'feed' ' ['E'E_ReverseRotationSpindle]}
+        ;Uzycie adresu Q
+		elseif I_FirstPeck eq 0 and K_MinimumDepth eq 0 then
+			{nb, 'G98 G'iDrillmode ' X'xpos' Y'ypos' Z'drill_lower_z' R'drill_upper_z' Q'Q_Peck,[' P'P_Dwell],' F'feed' ' ['E'E_ReverseRotationSpindle]}
+		else 
+		;Uzycie adresu I J K
+            {nb, 'G98 G'iDrillmode ' X'xpos' Y'ypos' Z'drill_lower_z' R'drill_upper_z' I'I_FirstPeck' J'J_ReduceAmount' K'K_MinimumDepth,[' P'P_Dwell],' F'feed' ' ['E'E_ReverseRotationSpindle]}
+        endif
+endp
+
+;cykl standardowy nawiercania wstepnego G82 z przerwa
+@usr_drill_82
+	if P_Dwell eq 0 then
+		;brak przerwy czasowej uzyj G81
+		call @usr_drill_81
+	else
+		call @usr_check_message(sG82Msg,(TRUE))
+        iDrillmode = 82
+        {nb, 'G98 G'iDrillmode ' X'xpos' Y'ypos' Z'drill_lower_z' R'drill_upper_z' P'P_Dwell' F'feed' ' ['E'E_ReverseRotationSpindle]}
+	endif
+endp
+
+;cykl standardowy nawiercania precyzyjnego G83
+@usr_drill_83
+call @usr_check_message(sG83Msg,(TRUE))
+        iDrillmode = 83
+        if P_Dwell eq 0
+            change(P_Dwell) = false
+        endif
+		;Uzycie adresu Q
+        if Q_Peck != 0 then
+            {nb, 'G98 G'iDrillmode ' X'xpos' Y'ypos' Z'drill_lower_z' R'drill_upper_z' Q'Q_Peck,[' P'P_Dwell],' F'feed' ' ['E'E_ReverseRotationSpindle]}
+        ;Uzycie adresu I J K
+		elseif I_FirstPeck !=0 and J_ReduceAmount != 0 and K_MinimumDepth != 0 then
+            {nb, 'G98 G'iDrillmode ' X'xpos' Y'ypos' Z'drill_lower_z' R'drill_upper_z' I'I_FirstPeck' J'J_ReduceAmount' K'K_MinimumDepth,[' P'P_Dwell],' F'feed' ' ['E'E_ReverseRotationSpindle]}
+		else
+		;brak zdefiniowanych wartosci uzyj innego cyklu
+			if P_Dwell eq 0 then
+				call @usr_drill_81
+			else
+				call @usr_drill_82
+			endif
+        endif
+endp
+
+;cykl gwintowania
+
+@usr_drill_g84_G74
+	
+    {nb, 'G98 G'iDrillmode ' X'xpos' Y'ypos' Z'drill_lower_z' R'drill_upper_z, [' J'J_RetractMultiple], ' F'feed ' '}
+	
+endp
+
+@usr_drill_g84_G74_Peck
+		
+	
+	if Q_Peck <=0 or Q_Peck>=drill_depth then 
+		call @usr_drill_g84_G74
+	else
+	
+		call @usr_check_message(sP133_Msg,(TRUE))
+		if drill_type eq G84_Peck then 
+			call @usr_check_message(sG84_PeckMsg,(TRUE))
+		elseif drill_type eq G74_Peck then
+			call @usr_check_message(sG74_PeckMsg,(TRUE))
+		endif
+				
+		lCustomPeckDrill = true
+		
+		local numeric act_z_level peck_z
+		act_z_level = drill_upper_z
+		act_z_level = act_z_level - Q_Peck
+		{nb, 'G98 G'iDrillmode ' X'xpos' Y'ypos' Z'act_z_level' R'drill_upper_z, [' J'J_RetractMultiple], ' F'feed ' '}
+		first_drill = true
+		call @usr_peck_generate(act_z_level)
+	endif
+	
+endp
+
+@usr_drill_G47
+	call @usr_check_message(sG47Msg,(TRUE))
+	{nb,'G47 P'P_literal_text ' (' replace(replace(T_grawering_text, ')',''), '(','') ') X'xpos ' Y'ypos}
+	if I_Angle_rotation != 0 then
+		{' I'I_Angle_rotation}
+	endif
+	{' J'J_Text_Height ' R'drill_upper_z ' Z'drill_lower_z ' F'F_Engraving_feedrate ' E'feed}
+endp
+
+
+@usr_dril_supprogram_G47
+	call @usr_check_message(sG47Msg,(TRUE))
+	local integer s_n_count s_n_sharp_pos s_n_text_pos text_length act_text_gravering 
+	s_n_count = 0 ;ile znakow w num seryjnym
+	s_n_sharp_pos = 0 ;pozycja znakow temp
+	s_n_text_pos = 0 ;pozycja w ktorej sie zaczyna numer seryjny
+	text_length = strlen(T_grawering_text)
+	act_text_gravering = 1
+	if text_length > 0 then
+	
+		if P_literal_text eq 1 then
+			
+			s_n_sharp_pos = instr(T_grawering_text, '#' ,1)
+			s_n_text_pos = s_n_sharp_pos
+			while s_n_sharp_pos != 0
+				s_n_sharp_pos = instr(T_grawering_text, '#' ,s_n_sharp_pos)
+				if s_n_sharp_pos != 0 then
+					s_n_count=s_n_count+1
+					s_n_sharp_pos = s_n_sharp_pos+1
+				endif
+			endw			
+			
+		endif
+		
+		while act_text_gravering <= text_length
+		if P_literal_text eq 1 and act_text_gravering >= s_n_text_pos and act_text_gravering<s_n_text_pos+s_n_count then
+			{nb, 'G65 P7002 D' s_n_count '. X'xpos' Y'ypos' Z'drill_lower_z' R'drill_upper_z' I'I_Angle_rotation' J'J_Text_Height' E'feed' F'F_Engraving_feedrate' K'act_text_gravering'.'}
+			act_text_gravering =act_text_gravering+s_n_count-1
+		else
+
+			call @usr_char_to_number_AZ((substr(T_grawering_text, act_text_gravering, 1)))
+			if iNumberCharToGrav eq 0 then
+				call @usr_char_to_number_small_az((substr(T_grawering_text, act_text_gravering, 1)))
+			endif
+			if iNumberCharToGrav eq 0 then
+				call @usr_char_to_number_number((substr(T_grawering_text, act_text_gravering, 1)))
+			endif			
+			if iNumberCharToGrav eq 0 then
+				call @usr_char_to_number_symbols((substr(T_grawering_text, act_text_gravering, 1)))
+			endif
+			{nb, 'G65 P7000 T'iNumberCharToGrav'. X'xpos' Y'ypos' Z'drill_lower_z' R'drill_upper_z' I'I_Angle_rotation' J'J_Text_Height' E'feed' F'F_Engraving_feedrate' K'act_text_gravering'.'}
+			iNumberCharToGrav=0
+		endif
+			
+		act_text_gravering = act_text_gravering+1
+		endw
+
+		
+		
+	endif
+endp
+
+
+
+@usr_char_to_number_AZ(string char_to_convert)
+	
+	if char_to_convert eq 'A' then
+		iNumberCharToGrav = 65
+	elseif char_to_convert eq 'B' then
+		iNumberCharToGrav = 66
+	elseif char_to_convert eq 'C' then
+		iNumberCharToGrav = 67
+	elseif char_to_convert eq 'D' then
+		iNumberCharToGrav = 68
+	elseif char_to_convert eq 'E' then
+		iNumberCharToGrav = 69
+	elseif char_to_convert eq 'F' then
+		iNumberCharToGrav = 70
+	elseif char_to_convert eq 'G' then
+		iNumberCharToGrav = 71
+	elseif char_to_convert eq 'H' then
+		iNumberCharToGrav = 72
+	elseif char_to_convert eq 'I' then
+		iNumberCharToGrav = 73
+	elseif char_to_convert eq 'J' then
+		iNumberCharToGrav = 74
+	elseif char_to_convert eq 'K' then
+		iNumberCharToGrav = 75
+	elseif char_to_convert eq 'L' then
+		iNumberCharToGrav = 76
+	elseif char_to_convert eq 'M' then
+		iNumberCharToGrav = 77
+	elseif char_to_convert eq 'N' then
+		iNumberCharToGrav = 78
+	elseif char_to_convert eq 'O' then
+		iNumberCharToGrav = 79
+	elseif char_to_convert eq 'P' then
+		iNumberCharToGrav = 80
+	elseif char_to_convert eq 'Q' then
+		iNumberCharToGrav = 81
+	elseif char_to_convert eq 'R' then
+		iNumberCharToGrav = 82
+	elseif char_to_convert eq 'S' then
+		iNumberCharToGrav = 83
+	elseif char_to_convert eq 'T' then
+		iNumberCharToGrav = 84
+	elseif char_to_convert eq 'U' then
+		iNumberCharToGrav = 85
+	elseif char_to_convert eq 'V' then
+		iNumberCharToGrav = 86
+	elseif char_to_convert eq 'W' then
+		iNumberCharToGrav = 87
+	elseif char_to_convert eq 'X' then
+		iNumberCharToGrav = 88
+	elseif char_to_convert eq 'Y' then
+		iNumberCharToGrav = 89
+	elseif char_to_convert eq 'Z' then
+		iNumberCharToGrav = 90
+	else
+		iNumberCharToGrav = 0
+	endif
+endp
+
+@usr_char_to_number_small_az(string char_to_convert)
+	
+	if char_to_convert eq 'a' then
+		iNumberCharToGrav = 97
+	elseif char_to_convert eq 'b' then
+		iNumberCharToGrav = 98
+	elseif char_to_convert eq 'c' then
+		iNumberCharToGrav = 99
+	elseif char_to_convert eq 'd' then
+		iNumberCharToGrav = 100
+	elseif char_to_convert eq 'e' then
+		iNumberCharToGrav = 101
+	elseif char_to_convert eq 'f' then
+		iNumberCharToGrav = 102
+	elseif char_to_convert eq 'g' then
+		iNumberCharToGrav = 103
+	elseif char_to_convert eq 'h' then
+		iNumberCharToGrav = 104
+	elseif char_to_convert eq 'i' then
+		iNumberCharToGrav = 105
+	elseif char_to_convert eq 'j' then
+		iNumberCharToGrav = 106
+	elseif char_to_convert eq 'k' then
+		iNumberCharToGrav = 107
+	elseif char_to_convert eq 'l' then
+		iNumberCharToGrav = 108
+	elseif char_to_convert eq 'm' then
+		iNumberCharToGrav = 109
+	elseif char_to_convert eq 'n' then
+		iNumberCharToGrav = 110
+	elseif char_to_convert eq 'o' then
+		iNumberCharToGrav = 111
+	elseif char_to_convert eq 'p' then
+		iNumberCharToGrav = 112
+	elseif char_to_convert eq 'q' then
+		iNumberCharToGrav = 113
+	elseif char_to_convert eq 'r' then
+		iNumberCharToGrav = 114
+	elseif char_to_convert eq 's' then
+		iNumberCharToGrav = 115
+	elseif char_to_convert eq 't' then
+		iNumberCharToGrav = 116
+	elseif char_to_convert eq 'u' then
+		iNumberCharToGrav = 117
+	elseif char_to_convert eq 'v' then
+		iNumberCharToGrav = 118
+	elseif char_to_convert eq 'w' then
+		iNumberCharToGrav = 119
+	elseif char_to_convert eq 'x' then
+		iNumberCharToGrav = 120
+	elseif char_to_convert eq 'y' then
+		iNumberCharToGrav = 121
+	elseif char_to_convert eq 'z' then
+		iNumberCharToGrav = 122
+	else
+		iNumberCharToGrav = 0
+	endif
+endp
+
+@usr_char_to_number_number(string char_to_convert)
+	
+	if char_to_convert eq '0' then
+		iNumberCharToGrav = 48
+	elseif char_to_convert eq '1' then
+		iNumberCharToGrav = 49
+	elseif char_to_convert eq '2' then
+		iNumberCharToGrav = 50
+	elseif char_to_convert eq '3' then
+		iNumberCharToGrav = 51
+	elseif char_to_convert eq '4' then
+		iNumberCharToGrav = 52
+	elseif char_to_convert eq '5' then
+		iNumberCharToGrav = 53
+	elseif char_to_convert eq '6' then
+		iNumberCharToGrav = 54
+	elseif char_to_convert eq '7' then
+		iNumberCharToGrav = 55
+	elseif char_to_convert eq '8' then
+		iNumberCharToGrav = 56
+	elseif char_to_convert eq '9' then
+		iNumberCharToGrav = 57
+	else
+		iNumberCharToGrav = 0
+	endif
+endp
+
+@usr_char_to_number_symbols(string char_to_convert)
+	if char_to_convert eq ' ' then
+		iNumberCharToGrav = 32
+	elseif char_to_convert eq '!' then
+		iNumberCharToGrav = 33
+	elseif char_to_convert eq '"' then
+		iNumberCharToGrav = 34
+	elseif char_to_convert eq '#' then
+		iNumberCharToGrav = 35
+	elseif char_to_convert eq '$' then
+		iNumberCharToGrav = 36
+	elseif char_to_convert eq '%' then
+		iNumberCharToGrav = 37
+	elseif char_to_convert eq '&' then
+		iNumberCharToGrav = 38
+	elseif char_to_convert eq "'" then
+		iNumberCharToGrav = 39
+	elseif char_to_convert eq '(' then
+		iNumberCharToGrav = 40
+	elseif char_to_convert eq ')' then
+		iNumberCharToGrav = 41
+	elseif char_to_convert eq '*' then
+		iNumberCharToGrav = 42
+	elseif char_to_convert eq '+' then
+		iNumberCharToGrav = 43
+	elseif char_to_convert eq ',' then
+		iNumberCharToGrav = 44
+	elseif char_to_convert eq '-' then
+		iNumberCharToGrav = 45
+	elseif char_to_convert eq '.' then
+		iNumberCharToGrav = 46
+	elseif char_to_convert eq '/' then
+		iNumberCharToGrav = 47
+	elseif char_to_convert eq ':' then
+		iNumberCharToGrav = 58
+	elseif char_to_convert eq ':' then
+		iNumberCharToGrav = 59
+	elseif char_to_convert eq '<' then
+		iNumberCharToGrav = 60
+	elseif char_to_convert eq '=' then
+		iNumberCharToGrav = 61
+	elseif char_to_convert eq '>' then
+		iNumberCharToGrav = 62
+	elseif char_to_convert eq '?' then
+		iNumberCharToGrav = 63
+	elseif char_to_convert eq '@' then
+		iNumberCharToGrav = 64
+	elseif char_to_convert eq '[' then
+		iNumberCharToGrav = 91
+	elseif char_to_convert eq '\\' then
+		iNumberCharToGrav = 92
+	elseif char_to_convert eq ']' then
+		iNumberCharToGrav = 93
+	elseif char_to_convert eq '^' then
+		iNumberCharToGrav = 94
+	elseif char_to_convert eq '_' then
+		iNumberCharToGrav = 95
+	elseif char_to_convert eq '`' then
+		iNumberCharToGrav = 96
+	elseif char_to_convert eq '{' then
+		iNumberCharToGrav = 123
+	elseif char_to_convert eq '|' then
+		iNumberCharToGrav =124
+	elseif char_to_convert eq '}' then
+		iNumberCharToGrav = 125
+	elseif char_to_convert eq '~' then
+		iNumberCharToGrav = 126
+	else
+		iNumberCharToGrav = 0
+	endif
+endp
+
+@usr_peck_generate (numeric act_z_level)
+	
+	local logical first_peck
+	if first_drill eq 0 then
+		first_peck =true
+	endif
+	
+	while act_z_level != drill_lower_z
+	
+
+		if act_z_level - Q_Peck > drill_lower_z then
+				act_z_level = act_z_level - Q_Peck
+		else
+				act_z_level = drill_lower_z
+		endif
+		if first_peck eq 1 then
+			{' Z'act_z_level}
+			first_peck = false
+		else
+			{nb, 'X'xpos' Y'ypos ' Z'act_z_level}
+		endif
+		
+	
+	endw
+endp
+
+@drill
+
+	lCustomPeckDrill = false
+
+	if i_NGHC == 0 then
+		change (E_ReverseRotationSpindle) = false
+	endif
+
+	call @rapid_move
+	;CYKLE WIERCENIA
+	;wysokoobrotowy cykl nawiercania precyzyjnego G73
+	if drill_type eq G73 then
+			call @usr_drill_73
+    endif
+	
+	;cykl standardowy nawiercania G81		
+	if drill_type eq G81 then
+		call @usr_drill_81
+    endif
+	
+	;cykl standardowy nawiercania wstepnego G82 z przerwa
+	if drill_type eq G82 then
+		call @usr_drill_82
+    endif
+	
+	;cykl standardowy nawiercania precyzyjnego G83
+    if drill_type eq G83 then
+		call @usr_drill_83
+		
+    endif
+	
+	;CYKLE GWINTOWANIA
+	
+	if drill_type eq G84 or drill_type eq G74 or drill_type eq G84_Peck or drill_type eq G74_Peck then 
+		
+		if J_RetractMultiple <=0 then
+			;jezeli wartosc J jest mniejsza lub rowna 0 to nie wstawiaj
+			change(J_RetractMultiple) = false
+		else 
+			change(J_RetractMultiple) = true
+		endif
+		
+		if drill_type eq G84 or drill_type eq G84_Peck then		
+			iDrillmode = 84		 			
+		elseif drill_type eq G74 or drill_type eq G74_Peck then		
+			iDrillmode = 74			
+		endif
+		
+		;standardowy cykl gwintowania - gwint prawy G84 i lewy G74
+		if drill_type eq G84 or drill_type eq G74 then
+			call @usr_drill_g84_G74
+		elseif drill_type eq G84_Peck or drill_type eq G74_Peck then
+			call @usr_drill_g84_G74_Peck	
+		endif		
+	
+	endif
+	
+	
+
+	
+	;CYKL WYTACZANIA
+	;G76 cykl standardowy wytaczania precyzyjnego
+	if drill_type eq G76        
+        iDrillmode = 76
+		if Q_Shift eq 0
+			call @usr_check_message(sG76Msg,(TRUE))
+			;wytaczanie z odsunieciem IJ
+            {nb, 'G98 G'iDrillmode ' X'xpos' Y'ypos' Z'drill_lower_z' R'drill_upper_z' P'P_Dwell' I'I_ShiftX' J'J_ShiftY' F'feed ' '}			
+		else
+			;wytaczanie z odsunieciem Q
+            {nb, 'G98 G'iDrillmode ' X'xpos' Y'ypos' Z'drill_lower_z' R'drill_upper_z' P'P_Dwell' Q'Q_Shift' F'feed ' '}   
+		endif
+    endif
+	
+	;G77 standardowy wytaczania zwrotnego
+	if drill_type eq G77 then
+		iDrillmode = 77
+		if Q_Shift eq 0
+			call @usr_check_message(sG77Msg,(TRUE))
+			;wytaczanie z odsunieciem IJ
+            {nb, 'G98 G'iDrillmode ' X'xpos' Y'ypos' Z'drill_lower_z' R'drill_upper_z' I'I_ShiftX' J'J_ShiftY' F'feed ' '}			
+		else
+			;wytaczanie z odsunieciem Q
+            {nb, 'G98 G'iDrillmode ' X'xpos' Y'ypos' Z'drill_lower_z' R'drill_upper_z' Q'Q_Shift' F'feed ' '}   
+		endif
+	endif
+	;G85 cykl standardowy wytaczania
+	;G86 cykl standardowy - wytaczanie i zatrzymywanie
+	;G87 cykl standardowy - wytaczania i wycofywanie ręczne
+	if drill_type eq G85 or drill_type eq G86 or drill_type eq G87 then
+		
+		if drill_type eq G85 then
+			iDrillmode = 85
+			call @usr_check_message(sG85Msg,(TRUE))
+		elseif drill_type eq G86 then
+			iDrillmode = 86
+			call @usr_check_message(sG86Msg,(TRUE))
+		elseif drill_type eq G87 then
+			iDrillmode = 87
+			call @usr_check_message(sG87Msg,(TRUE))			
+		endif
+		{nb, 'G98 G'iDrillmode ' X'xpos' Y'ypos' Z'drill_lower_z' R'drill_upper_z' F'feed ' '}  
+	endif
+	;G88 cykl standardowy - wytaczanie, sterowana przerwa w ruchu i wycofywanie ręczne
+	;G89 cykl standardowy - wytaczanie,sterowana przerwa w ruchu i wycofanie
+	if drill_type eq G88 or drill_type eq G89 then
+		
+		if drill_type eq G88 then
+			iDrillmode = 88
+			call @usr_check_message(sG88Msg,(TRUE))
+		elseif drill_type eq G89 then
+			iDrillmode = 89
+			call @usr_check_message(sG89Msg,(TRUE))
+		endif
+		
+		 {nb, 'G98 G'iDrillmode ' X'xpos' Y'ypos' Z'drill_lower_z' R'drill_upper_z' P'P_Dwell' F'feed ' '} 
+		 
+	endif
+	;Cykl grawerowania G47
+	
+	if drill_type eq G47 then
+		if L_Sub_Prog_G47 eq 1 then
+			call @usr_dril_supprogram_G47
+		else
+			call @usr_drill_G47
+		endif
+	endif
+	
+endp
+
+;nastepny otwor w cyklu
+@drill_point
+        if !first_drill then
+						
+			call @usr_Chlip_Clear
+            {nb,['X'xpos ' '], ['Y'ypos ' '], ['Z'zpos ' ']}
+			
+			if lCustomPeckDrill == 1 then
+				call @usr_peck_generate(zpos)
+			endif
+			
+        endif
+ 
+endp
+
+@usr_Chlip_Clear
+	;czy wlaczone czyszczenie narzedzia  lewymi obrotami - starsza wersja sterowania
+			if i_NGHC == 0 and E_ReverseRotationSpindle!= 0 then
+				{nb, 'M04 S'E_ReverseRotationSpindle}
+				{nb, 'G04 P'n_Chip_Clear_Time}
+				{nb, 'M03 S'iActualSpinrate}
+			endif
+endp
+
+;procedura ktora wstawia komentarz jezeli nie jet pusty
+@usr_check_message(string mes_to_chceck, logical new_line)
+	if mes_to_chceck != '' then
+		if new_line eq true then
+			{nb, sSC mes_to_chceck sEC }
+		else
+			{sSC mes_to_chceck sEC}
+		endif
+	endif
+endp
+
+
+;procedur wywolywana przed definicja narzedzi
+@usr_before_tool_def
+
+	if sToolDefinictionMessage != '' then
+	{nb}
+	call @usr_check_message(sToolDefinictionMessage,(TRUE) )
+	endif
+endp
+;procedura wywolana po definicji narzedzi
+@usr_after_tool_def
+	call @usr_check_message(('----------------------------'),(TRUE)) 
+	{nb}
+	call @usr_check_message(sStartProgramMessage,(TRUE))
+	{nb}
+endp
+;kierunek i obroty wrzeciona
+@usr_spindle_def
+	local integer iSpinRateConversion 
+	;zmiana obrotow na integer
+	
+	iSpinRateConversion = int(spin_rate)
+	;jezeli spin rate jest wiekszy od 0
+	if iSpinRateConversion >0 then
+		;przypisanie aktualnego kierunku i obrotow do zmiennych
+		iActualSpinrate = iSpinRateConversion
+		iActualToolDirection = tool_direction
+		;jezeli zmienily sie obroty albo kierunek lub jest ustawione aby zawsze wstawial obroty w operacjach
+		if change(iActualSpinrate) or change(iActualToolDirection) or lIsStartJob then
+			{nb, 'S' iSpinRateConversion, ' '}
+			skipline = false				
+			if tool_direction eq 0 then
+				{'M03'} ;prawe obroty
+			else
+				{'M04'} ;lewe obroty
+			endif
+		endif
+		skipline = true;	
+	else
+		;wylaczenie obrotow wrzeciona spin_rate = 0
+		{nb, 'M05'}
+		iActualSpinrate = 0
+	endif
+endp
+
+;procedura wyboru chlodzenia
+@usr_coolant
+		
+
+	if through_coolant eq 0 and flood_coolant eq 1 then
+		;chlodzenie zalewaniem wlaczone
+		call @usr_coolant_flood_ON((1))
+	elseif through_coolant eq 0 and flood_coolant eq 0 then
+		;chlodzenie zalewaniem wylaczone
+		call @usr_coolant_OFF
+	elseif through_coolant eq 1 then
+		;chlodzenie przez wrzeciono
+		call @usr_coolant_TSC_ON((1))
+	endif
+	
+	if air_blast_coolant eq 1 then
+		call @usr_coolant_AAG_MQL_ON((1))
+	else 
+		call @usr_coolant_AAG_MQL_OFF((1))
+	endif
+	
+	if air_through_coolant eq 1 then
+		call @usr_coolant_TAB_ON((1))
+	else
+		call @usr_coolant_TAB_OFF((1))
+	endif
+	;lTAB_ON	
+	;air_blast_coolant:on air_through_coolant:no_action
+	
+endp
+
+;wylaczenie chlodzenia
+@usr_coolant_OFF		
+			
+			call @usr_coolant_flood_OFF((1))
+			call @usr_coolant_TSC_OFF((1))
+			call @usr_coolant_AAG_MQL_OFF((1))
+			call @usr_coolant_TAB_OFF((1))
+			
+endp
+
+@usr_coolant_flood_ON(logical lCNewLine)
+	
+
+	if iActualCollantFlood eq 2 then 
+		call @usr_coolant_TSC_OFF((1))
+	endif
+	
+	if iActualCollantFlood eq 0 then
+		
+		if lCNewLine eq 1 then
+			{nb, 'M08', ' '} 
+		else 
+			{'M08', ' '} 
+		endif
+		
+		iActualCollantFlood = 1
+	endif
+	
+endp
+
+@usr_coolant_flood_OFF(logical lCNewLine)
+	
+	if iActualCollantFlood eq 1 then
+		if lCNewLine eq 1 then
+			{nb, 'M09', ' '} 
+		else 
+			{'M09', ' '}
+		endif
+		iActualCollantFlood = 0
+	endif
+	
+endp
+
+@usr_coolant_TSC_ON(logical lCNewLine)
+	
+	
+	if iActualCollantFlood eq 1 then 
+		call @usr_coolant_flood_OFF((1))
+	endif
+	
+	if iActualCollantFlood eq 0 then
+		if lCNewLine eq 1 then
+			{nb, 'M88', ' '}
+		else
+			{'M88', ' '}
+		endif
+		iActualCollantFlood = 2
+	endif
+endp
+
+@usr_coolant_TSC_OFF(logical lCNewLine)
+
+
+	if iActualCollantFlood eq 2 then
+		if lCNewLine eq 1 then
+			{nb, 'M89', ' '}
+		else
+			{'M89', ' '}
+		endif
+		iActualCollantFlood = 0
+	endif
+endp
+
+
+@usr_coolant_AAG_MQL_ON(logical lCNewLine)
+		
+	if lAAG_MQL_ON eq 0 then
+		if lCNewLine eq 1 then
+			{nb, 'M83', ' '}
+		else
+			{'M83', ' '}
+		endif
+		lAAG_MQL_ON = true
+	endif
+endp
+
+@usr_coolant_AAG_MQL_OFF(logical lCNewLine)
+
+	if lAAG_MQL_ON eq 1 then
+		if lCNewLine eq 1 then
+			{nb, 'M84', ' '}
+		else
+			{'M84', ' '}
+		endif
+		lAAG_MQL_ON = false
+	endif
+endp
+
+@usr_coolant_TAB_ON(logical lCNewLine)
+
+	if lTAB_ON eq 0 then
+		if lCNewLine eq 1 then
+			{nb, 'M73', ' '}
+		else
+			{'M73', ' '}
+		endif
+		lTAB_ON = true
+	endif
+endp
+
+@usr_coolant_TAB_OFF(logical lCNewLine)
+	
+	if lTAB_ON eq 1 then
+		if lCNewLine eq 1 then
+			{nb, 'M74', ' '}
+		else
+			{'M74', ' '}
+		endif
+		lTAB_ON = false
+	endif
+endp
+
+
+;kompensacja dlugosci narzedzia
+@usr_height_compensation
+	;gcode = 43 ;kompensacja dlugosci nazredzia G43
+	{'G43', ' ', 'H'h_offset, ' '}
+	skipline = false
+endp
+
+;wlaczenie rotacji ukladu wsp po pomiarze
+@usr_rotate_coordinate_on
+	
+	if Rotatate_G68 eq 1 or lG68_All_Operation eq true then
+	
+
+		;czy zdefiniowny naroznik
+		if usr_angle_corner > 0 and usr_angle_corner < 5 then
+			if  lG68_All_Operation eq false then
+				iProbeAngleCornerTemp = iProbeAngleCorner
+				iProbeAngleCorner = usr_angle_corner
+			endif
+		endif
+		
+		
+		
+		if lG68_All_Operation eq false and Rotate_G68_next_operations eq true
+			lG68_All_Operation = true
+			
+				iProbeAngleCornerNextOperation = iProbeAngleCorner
+				sRotation_angleNextOperation = Rotation_angle
+				nRotate_XNextOperation =Rotate_X
+				nRotate_YNextOperation =Rotate_Y
+		elseif lG68_All_Operation eq true then
+				iProbeAngleCorner=iProbeAngleCornerNextOperation
+				Rotation_angle=sRotation_angleNextOperation 
+				Rotate_X=nRotate_XNextOperation
+				Rotate_Y=nRotate_YNextOperation
+			
+		endif
+		 
+
+		;czy rotacj z pomiaru sonda
+		if Rotation_angle eq '0' and Rotate_X eq 0 and Rotate_Y eq 0 then
+			;rotacja od bazy
+			if iProbeAngleCorner > 0 and iProbeAngleCorner < 5 then
+				;kat zmierzona sonda
+				call @usr_check_message(sRotateCoordinateON,(TRUE))
+				{nb, 'G17 G68 X'nXrotPM, ' Y'nXrotPM, ' R'}
+				lUseRotateCoordinate = true
+				if iProbeAngleCorner eq 1 then
+					{'[#189-180]'}
+				elseif iProbeAngleCorner eq 2 then
+					{'#189'}
+				elseif iProbeAngleCorner eq 3 then
+					{'#189'}
+				elseif iProbeAngleCorner eq 4 then
+					{'[#189-180]'}
+				endif
+			endif
+		else
+			call @usr_check_message(sRotateCoordinateON,(TRUE))
+			{nb, 'G17 G68 X'Rotate_X, ' Y'Rotate_Y, ' R'Rotation_angle}
+			lUseRotateCoordinate = true
+		endif
+		
+		;iProbeAngleCorner
+		;{nb, 'G17 G68 '}
+	
+	endif
+	;
+	
+	;{nb, 'G68 X',nXrotPM ' Y', nXrotPM ' R#', iAngleProbe}
+	skipline = true
+	
+endp
+
+@usr_rotate_coordinate_off
+
+		if usr_angle_corner > 0 and usr_angle_corner < 5 and lG68_All_Operation eq false then
+			 iProbeAngleCorner = iProbeAngleCornerTemp			
+		endif
+	
+	if lUseRotateCoordinate eq 1 then
+		call @usr_check_message(sRotateCoordinateOFF,(TRUE))
+		{nb, 'G69'}
+		skipline = true
+		lUseRotateCoordinate = false
+	endif
+	
+	
+	
+endp
+
+;wylaczenie rotacji ukladu wsp
+
+;Procedura do konwertorowania daty
+@usr_date_convert
+	
+	;jezeli data zostaje jako domyslna SolidCam, wstawia date i wychodzi z procedury
+	if iDateFormat eq 1 then
+		{nb, sSC sTextBeforeDateFileCreate date sSP time sEC }
+		return
+	endif
+	
+	;data nie jest domyslna, start konwersji
+	
+	local string month month_numeric day year month_translate
+		
+	day = substr(date,1,2) 	
+	month = substr(date,4,3)
+	year = substr(date,8,4)
+		
+	if month eq 'JAN' then
+		month_numeric = '01'
+		month_translate = 'Styczen'
+	elseif month eq 'FEB' then	
+		month_numeric = '02'
+		month_translate = 'Luty'
+	elseif month eq 'MAR' then	
+		month_numeric = '03'
+		month_translate = 'Marzec'
+	elseif month eq 'APR' then	
+		month_numeric = '04'
+		month_translate = 'Kwiecien'
+	elseif month eq 'MAY' then	
+		month_numeric = '05'
+		month_translate = 'Maj'
+	elseif month eq 'JUN' then	
+		month_numeric = '06'
+		month_translate = 'Czerwiec'
+	elseif month eq 'JUL' then	
+		month_numeric = '07'
+		month_translate = 'Lipiec'
+	elseif month eq 'AUG' then	
+		month_numeric = '08'
+		month_translate = 'Sierpien'
+	elseif month eq 'SEP' then	
+		month_numeric = '09'
+		month_translate = 'Wrzesien'
+	elseif month eq 'OCT' then	
+		month_numeric = '10'
+		month_translate = 'Pazdziernik'
+	elseif month eq 'NOV' then	
+		month_numeric = '11'
+		month_translate = 'Listopad'
+	elseif month eq 'DEC' then	
+		month_numeric = '12'
+		month_translate = 'Grudzien'
+	endif
+	;generowanie przekonwertorowanej daty
+	if iDateFormat eq 2 then
+	{nb, sSC sTextBeforeDateFileCreate day '-' month_numeric '-' year sSP time sEC }
+	elseif iDateFormat eq 3 then
+	{nb, sSC sTextBeforeDateFileCreate day '-' month_translate '-' year sSP time sEC }
+	elseif iDateFormat eq 4 then
+	{nb, sSC sTextBeforeDateFileCreate year '-' month_numeric '-' day sSP time sEC }
+	else
+	{nb, sSC sTextBeforeDateFileCreate day '-' month_numeric '-' year sSP time sEC }
+	endif
+endp
+;---------------------MCO-------------------------
+
+
+
+@start_obj_act
+
+endp
+
+@start_mach_ctrl
+	{nb}
+	call @usr_check_message(machine_control_name,(TRUE)) 
+	lUsedMCO = true
+	lFirstMoveControlMachine = true
+endp
+
+;ruch
+@move_object 
+	;jaki posow
+	if is_rapid_move == true then
+		gcode = 0
+	else 
+		gcode = 1
+	endif
+	;ruch
+	
+	if lFirstMoveControlMachine eq 1 then
+		change(gcode)=true
+		{nb, ['G'gcode' G90 ']}
+	else
+		{nb, ['G'gcode' ']}
+	endif
+	
+
+	;jaka baza
+	if MCO_CoordSysType == 1 then
+			{'G53 '}
+	elseif 	MCO_CoordSysType == 2 then
+		call @home_number
+		;wywolanie bazy
+		{['G'iWorkoffset' ' ]}
+	endif
+
+
+
+	;co ma sie poruszac
+	
+	if DeviceIdNum == 1 then
+	{ 'Z'move_axis_z}	
+	elseif DeviceIdNum == 2 then
+	{ 'X'move_axis_x, ' ', 'Y'move_axis_y}
+	endif
+	lFirstMoveControlMachine = false
+
+endp
+
+@end_obj_act
+
+endp
+
+;zatrzymanie
+@machine_stop
+	if machine_stop == true then
+		if MCO_New_Line == true then
+			{nb, 'M00'}
+		else 
+			{' M00'}
+		endif
+
+	endif
+endp
+
+;wiadomosc
+@mco_message
+	if MCO_New_Line == true then
+		call @usr_check_message(message,(TRUE))
+	else
+		{ ' ' , sSC message sEC}
+	endif
+endp
+
+;Przerwa czasowa
+@dwell 
+	if dwell_time > 0 then 
+	
+		if MCO_New_Line == true then
+		{nb, 'G04 P', dwell_time}
+		else
+		{' G04 P', dwell_time}
+		endif
+				
+	endif
+endp
+
+;stop opcjonalny
+@machine_opt_stop 
+	if MCO_New_Line == true then
+		{nb, 'M01'}
+	else
+		{' M01'}
+	endif
+endp
+
+;trasporter 
+@chip_convery
+	
+	local string Chip_M_code
+	if chip_convey == 1 then
+		Chip_M_code = 'M31'
+	else
+		Chip_M_code = 'M33'
+	endif
+
+	if MCO_New_Line == true then
+		{nb, Chip_M_code}
+	else
+		{' ',Chip_M_code}
+	endif
+	
+endp
+
+;drzwi
+@door
+	local string door_M_code
+	if open_door == 1 then
+		door_M_code = 'M80'
+	else
+		door_M_code = 'M81'
+	endif
+	
+	if MCO_New_Line == true then
+		{nb, door_M_code}
+	else
+		{' ',door_M_code}
+	endif
+	
+endp
+
+@unload_tool
+	if MCO_New_Line == true then
+		{nb, 'M82'}
+	else
+		{' M82'}
+	endif
+endp
+
+@cool_flood
+	if flood_coolant eq 1 then
+		call @usr_coolant_flood_ON(MCO_New_Line)
+	else
+		call @usr_coolant_flood_OFF(MCO_New_Line)
+	endif
+	
+endp
+
+@cool_through_tool
+	if through_coolant eq 1 then
+		call @usr_coolant_TSC_ON(MCO_New_Line)
+	else
+		call @usr_coolant_TSC_OFF(MCO_New_Line)
+	endif
+
+endp
+
+@active_air_through_spindle
+	if air_blast_coolant eq 1 then
+		call @usr_coolant_TAB_ON(MCO_New_Line)
+	else
+		call @usr_coolant_TAB_OFF(MCO_New_Line)
+	endif
+endp
+
+
+   
+
+@act_air
+	if air_blast_coolant eq 1 then
+		call @usr_coolant_AAG_MQL_ON(MCO_New_Line)
+	else
+		call @usr_coolant_AAG_MQL_OFF(MCO_New_Line)
+	endif
+endp
+
+@spin
+	
+	local integer iSpinRateConversion 
+	;zmiana obrotow na integer
+	
+	iSpinRateConversion = int(spin_rate)
+
+	if MCO_New_Line == true then
+		{nb}
+	else
+		{' '}
+	endif
+
+	if spin_direction == 1 then
+		{'S',iSpinRateConversion,' M03'}
+	elseif spin_direction == 2 then
+		{'S',iSpinRateConversion,' M04'}
+	else
+		{'M05'}
+	endif
+	
+endp
+
+@spindle_orient
+	local numeric ulamek
+	local integer angle_P
+	local numeric angle_R
+	
+	ulamek = frac(ValSpindleOrientation)
+	angle_P = int (ValSpindleOrientation)
+	angle_R = round (ValSpindleOrientation, 2)
+
+	if MCO_New_Line == true then
+		{nb}
+	else
+		{' '}
+	endif
+	
+	if ulamek == 0 then
+	{'M19 P',angle_P}
+	else
+	{'M19 R',angle_R}
+	endif
+	
+endp
+
+
+@end_mach_ctrl
+
+endp
+
+
+;-----------------------------------------Procedury SONDY---------------------------
+
+@start_probe
+	;ActionProbeType - 1-Homeposition 2- Measurment
+	nProbeFeedRate = Feed_rate
+			;nie jest to pierwsza operacja , zostala zmieniona baza, nie zmienione narzedzie
+		if lHomeNumberChange eq 1 and lToolChanged eq false and  lFirstJob eq false then
+			{nb, ['G'iWorkoffset], ' (Zmiana bazy)'} 
+			
+			;Specjalnie zmieniam wartosc nXTempProbe i yTempProbe aby wygenerowac ponownie ruch sondy
+			zpos = job_start_level +Move_Z_Change_home;
+			call @move_prb
+			;na pozycje x i y
+			nXTempProbe =  xpos + 1
+			yTempProbe = ypos + 1
+		endif
+		
+		if lFirstJob eq true then 
+			lFirstJob = false
+		endif
+	
+endp
+
+@move_prb
+	if lProbeMoveBlock eq false then
+		;ruch sondy po zamontowaniu we wrzecionie
+		if lProbeStart then
+			; Szybki dojazd do bezpiecznej odleglosci
+				skipline = true
+				{nb}
+				call @usr_height_compensation
+				lIsStartJob = true;
+				local numeric zposTemp
+				zposTemp = zpos
+				zpos = zposTemp+nProbeZSD
+				call @rapid_move
+				zpos = zposTemp
+			;	{nb, 'G00', ' X'xpos, ' Y'ypos}
+			;	{nb, 'Z'(zpos+nProbeZSD) }
+				;orjentacja sondy
+				{nb, 'G65 P9832 (Sonda wlaczona)'}
+				;posow sondy chroniony
+				{nb, 'G65 P9810 Z' zpos, ' F'nProbeFeedRate}
+				lProbeStart = false
+				lProbeProtection = true
+
+		else
+
+
+			;posuw sondy chroniony
+			;posuw X i Y
+			if nXTempProbe ne xpos or  yTempProbe ne ypos  then
+				{nb, 'G65 P9810'}
+					if nXTempProbe ne xpos then
+					{' X'xpos }
+					endif
+					
+					if  yTempProbe ne ypos  then
+					{' Y'ypos }
+					endif
+					
+					
+				{' F'nProbeFeedRate}
+			endif
+			;posuw Z
+			if nXTempProbe ne zpos then
+			{nb, 'G65 P9810 Z'zpos' F'nProbeFeedRate}
+			
+			
+			endif
+			
+		endif
+				nXTempProbe = xpos
+				yTempProbe = ypos
+				zTempProbe = zpos
+	endif
+endp
+
+
+@usr_probe_overtravel
+	if change(PRB_Overtravel) eq TRUE then		
+		{' Q'PRB_Overtravel }
+	endif
+	
+endp
+
+@usr_probe_workoffset
+	;if change(PRB_Set_Workoffset) eq true then
+		if ActionProbeType eq 1 then 
+			{' S'iProbeWorkoffset}
+		endif
+		if iWorkoffsetP > 0 then
+			if iWorkoffsetP <=9 then
+				{'.0'iWorkoffsetP}
+			else
+				{'.'iWorkoffsetP}
+			endif
+		endif
+		
+	;endif
+endp
+
+@usr_PRB_X_Pos_Save
+	if change(PRB_X_Pos_Save) eq true then
+		if PRB_X_Pos_Save ne '' then
+			{nb, PRB_X_Pos_Save '=#185 (Zapis pozycji X w zmiennej 'PRB_X_Pos_Save ')'}
+		endif
+	endif
+endp
+
+@usr_PRB_Y_Pos_Save
+	if change(PRB_Y_Pos_Save) eq true then
+		if PRB_Y_Pos_Save ne '' then
+			{nb, PRB_Y_Pos_Save '=#186 (Zapis pozycji Y w zmiennej 'PRB_Y_Pos_Save ')'}
+		endif
+	endif
+endp
+
+@usr_PRB_Z_Pos_Save
+	if change(PRB_Z_Pos_Save) eq true then
+		if PRB_Z_Pos_Save ne '' then
+			{nb, PRB_Z_Pos_Save '=#187 (Zapis pozycji Z w zmiennej 'PRB_Z_Pos_Save ')'}
+		endif
+	endif
+endp
+
+@usr_PRB_Size_Save
+	if change(PRB_Size_Save) eq true then
+		if PRB_Size_Save ne '' then
+			{nb, PRB_Size_Save '=#188 (Zapis dlugosci w zmiennej 'PRB_Size_Save ')'}
+		endif
+	endif
+endp
+
+@usr_PRB_X_Angle_Save
+	if change(PRB_X_Angle_Save) eq true then
+		if PRB_X_Angle_Save ne '' then
+			{nb, PRB_X_Angle_Save '=#189 (Zapis kata X w zmiennej 'PRB_X_Angle_Save ')'}
+		endif
+	endif
+endp
+
+@usr_PRB_Y_Angle_Save
+	if change(PRB_Y_Angle_Save) eq true then
+		if PRB_Y_Angle_Save ne '' then
+			{nb, PRB_Y_Angle_Save '=#192 (Zapis kata Y w zmiennej 'PRB_Y_Angle_Save ')'}
+		endif
+	endif
+
+endp
+
+;pomiar pojedynczej plaszczyzn
+@prb_cyc_xyz_plan
+
+	;pomiar pojedynczej plaszczyzny Z0
+	
+	if ProbeCycle eq 'PRB_Z_PLANE' then
+	;pomiar pojedynczej plaszczyzny Z	
+		;local numeric zposmas
+		;zposmas = PRB_RetractDist*PRB_Dir
+		;komentarz
+		if zTempProbe ne (PRB_TP1_Z+PRB_RetractDist) then
+			{nb, 'G65 P9810 Z' (PRB_RetractDist+PRB_TP1_Z), ' F'nProbeFeedRate}
+			zTempProbe = PRB_RetractDist
+		endif
+		call @usr_check_message(sPRB_Z_PLANE_Msg,(TRUE))
+		{nb, 'G65 P9811 Z'PRB_TP1_Z }
+
+		
+	;pomiar pojedynczej plaszczyzny X
+	elseif ProbeCycle eq 'PRB_X_PLANE' then
+		;przesuniecie sondy na pomiarowa glebokosc Z - posuw chroniony
+		{nb, 'G65 P9810 Z' PRB_TP1_Z, ' F'Feed_rate}
+		zTempProbe = PRB_TP1_Z
+		;komentarz		
+		call @usr_check_message(sPRB_X_PLANE_Msg,(TRUE))
+		;Pomiar
+		{nb, 'G65 P9811 X'PRB_TP1_X }	
+	;pomiar pojedynczej plaszczyzny Y
+	elseif ProbeCycle eq 'PRB_Y_PLANE' then
+		;przesuniecie sondy na pomiarowa glebokosc Z - posuw chroniony
+		{nb, 'G65 P9810 Z' PRB_TP1_Z, ' F'Feed_rate}
+		zTempProbe = PRB_TP1_Z
+		;komentarz		
+		call @usr_check_message(sPRB_Y_PLANE_Msg,(TRUE))
+		;Pomiar
+		{nb, 'G65 P9811 Y'PRB_TP1_Y }		
+	endif
+	skipline = false
+	;czy jest Overtravel
+	call @usr_probe_overtravel
+	;czy mierzymy baze
+	call @usr_probe_workoffset
+	
+	skipline = true
+	call @usr_PRB_X_Pos_Save
+	call @usr_PRB_Y_Pos_Save
+	call @usr_PRB_Z_Pos_Save
+	call @usr_PRB_Size_Save
+	
+	;ProbeCycle
+	;PRB_X_PLANE - pomiar w X
+	;PRB_Y_PLANE - pomiar w Y
+	;PRB_Z_PLANE - pomiar w Z
+endp
+
+;pomiar wyspa, kieszen, kieszen-wyspa
+@prb_cyc_bos_pckt
+	;pomiar wyspy	
+	if ProbeCycle eq 'PRB_BOSS' then
+		if PRB_AlongAxis eq 'X' then
+			;pomiar tylko w X
+			call @usr_prb_bos_x
+		elseif PRB_AlongAxis eq 'Y' then
+			;pomiar tylko w Y
+			call @usr_prb_bos_y
+		elseif PRB_AlongAxis eq 'XY' then
+			;pomiar w XY
+			call @usr_prb_bos_x
+			call @usr_prb_bos_y			
+		endif
+	call @move_prb
+	;pomiar kieszeni
+	elseif ProbeCycle eq'PRB_POCKET' then 
+		;podjazd do Z
+		local numeric z_temp
+		z_temp = zpos
+		zpos = PRB_StartHeight
+		call @move_prb
+		
+		if PRB_AlongAxis eq 'X' then
+			;pomiar tylko w X
+			call @usr_prb_pocket_x
+		elseif PRB_AlongAxis eq 'Y' then
+			;pomiar tylko w Y
+			call @usr_prb_pocket_y
+		elseif PRB_AlongAxis eq 'XY' then
+			;pomiar w XY
+			call @usr_prb_pocket_x
+			call @usr_prb_pocket_y		
+		endif
+		zpos = z_temp
+	;pomiar wyspa kieszen
+	elseif ProbeCycle eq'PRB_POCKET_BOSS' then	
+		
+		;czy wiekszy od promienia kulki
+		if PRB_RetractDist > (tool_diameter/2) then
+			if PRB_AlongAxis eq 'X' then
+			;pomiar tylko w X
+				call @usr_prb_pocket_boss_x
+			elseif PRB_AlongAxis eq 'Y' then
+			;pomiar tylko w Y
+				call @usr_prb_pocket_boss_y
+			elseif PRB_AlongAxis eq 'XY' then
+			;pomiar w XY
+				call @usr_prb_pocket_boss_x
+				call @usr_prb_pocket_boss_y		
+			endif
+		
+		else
+			call @usr_check_message(sPRB_PB_Restrict_ErrorMsg,(TRUE))
+		endif
+	endif
+	
+endp
+;procedura pomiaru wyspy w X
+@usr_prb_bos_x
+	skipline = true
+	if PRB_LengthX > 0 then
+		call @usr_check_message(sPRB_X_BOSSMsg,(TRUE))
+		{nb, 'G65 P9812 X'PRB_LengthX, ' Z'PRB_TP1_Z }
+		skipline = false
+
+		
+		if PRB_RetractDist > 0 then
+		{' R'PRB_RetractDist }
+		endif
+		
+		;czy jest overtravel
+		call @usr_probe_overtravel
+		
+		;czy mierzymy baze
+		call @usr_probe_workoffset
+		skipline = true
+	else
+		call @usr_check_message(sPRB_PB_Lenght_Error_Msg,(TRUE))
+	endif
+
+	call @usr_PRB_X_Pos_Save
+	call @usr_PRB_Y_Pos_Save
+	call @usr_PRB_Size_Save
+	
+endp
+
+;procedura pomiaru wyspy w Y
+@usr_prb_bos_y
+
+	skipline = true
+	if PRB_LengthY > 0 then
+		call @usr_check_message(sPRB_Y_BOSSMsg,(TRUE))
+		{nb, 'G65 P9812 Y'PRB_LengthY, ' Z'PRB_TP2_Z }
+		skipline = false
+
+	
+		if PRB_RetractDist > 0 then
+		{' R'PRB_RetractDist }
+		endif
+		
+		;czy jest Overtravel
+		call @usr_probe_overtravel
+		
+		;czy mierzymy baze
+		call @usr_probe_workoffset
+		skipline = true
+	else
+		call @usr_check_message(sPRB_PB_Lenght_Error_Msg,(TRUE))
+	endif	
+	
+	call @usr_PRB_X_Pos_Save
+	call @usr_PRB_Y_Pos_Save
+	call @usr_PRB_Size_Save
+	
+endp
+;pomiar kieszenie w x
+@usr_prb_pocket_x
+	skipline = true
+	if PRB_LengthX > 0 then
+		call @usr_check_message(sPRB_X_POCKETMsg,(TRUE))
+		{nb, 'G65 P9812 X'PRB_LengthX}
+		skipline = false
+		;czy jest Overtravel
+		call @usr_probe_overtravel
+		;czy mierzymy baze
+		call @usr_probe_workoffset
+		skipline = true
+	else
+		call @usr_check_message(sPRB_PB_Lenght_Error_Msg,(TRUE))
+	endif
+	
+	call @usr_PRB_X_Pos_Save
+	call @usr_PRB_Y_Pos_Save
+	call @usr_PRB_Size_Save
+	
+endp
+;pomiar kieszeni w y
+@usr_prb_pocket_y
+skipline = true
+	if PRB_LengthY > 0 then
+		call @usr_check_message(sPRB_Y_POCKETMsg,(TRUE))
+		{nb, 'G65 P9812 Y'PRB_LengthY}
+		skipline = false
+		;czy jest Overtravel
+		call @usr_probe_overtravel
+		;czy mierzymy baze
+		call @usr_probe_workoffset
+		skipline = true
+	else
+		call @usr_check_message(sPRB_PB_Lenght_Error_Msg,(TRUE))
+	endif	
+	
+	call @usr_PRB_X_Pos_Save
+	call @usr_PRB_Y_Pos_Save
+	call @usr_PRB_Size_Save
+	
+	
+endp
+
+;pomiar kieszeni wyspy x
+@usr_prb_pocket_boss_x
+	skipline = true
+	if PRB_LengthX > 0 then
+		call @usr_check_message(sPRB_X_POCKET_BOSSMsg,(TRUE))
+		{nb, 'G65 P9812 X'PRB_LengthX, ' Z'PRB_TP1_Z, ' R-'(tool_diameter/2+PRB_PwB_Boss_offset)}
+		skipline = false
+		;czy jest Overtravel
+		call @usr_probe_overtravel
+		;czy mierzymy baze
+		call @usr_probe_workoffset
+		skipline = true
+	else
+		call @usr_check_message(sPRB_PB_Lenght_Error_Msg,(TRUE))
+	endif
+	
+	call @usr_PRB_X_Pos_Save
+	call @usr_PRB_Y_Pos_Save
+	call @usr_PRB_Size_Save
+	
+endp
+;pomiar kieszenie wyspy y
+@usr_prb_pocket_boss_y
+skipline = true
+	if PRB_LengthY > 0 then
+		call @usr_check_message(sPRB_Y_POCKET_BOSSMsg,(TRUE))
+		{nb, 'G65 P9812 Y'PRB_LengthY, ' Z'PRB_TP2_Z, ' R-'(tool_diameter/2+PRB_PwB_Boss_offset)}
+		skipline = false
+		;czy jest Overtravel
+		call @usr_probe_overtravel
+		;czy mierzymy baze
+		call @usr_probe_workoffset
+		skipline = true
+	else
+		call @usr_check_message(sPRB_PB_Lenght_Error_Msg,(TRUE))
+	endif	
+	
+	call @usr_PRB_X_Pos_Save
+	call @usr_PRB_Y_Pos_Save
+	call @usr_PRB_Size_Save
+	
+endp
+
+
+@end_probe
+	;if ProbeCycle eq 'PRB_Z_PLANE' then
+		;zpos = PRB_RetractDist;
+		;call @move_prb
+	;endif
+	nProbeX = xpos
+	nProbeY = ypos
+	nProbeZ = zpos
+	
+	
+endp
+
+;procedura pomiaruotwor cylinder
+@prb_cyc_hol_cyl
+		
+	;pomiar otwor
+	if ProbeCycle eq 'PRB_HOLE' then
+		if PRB_DiamCirMsr > tool_diameter then
+			local numeric zpos_temp
+			zpos_temp = zpos
+			zpos = PRB_StartHeight
+			call @move_prb
+			if PRB_NumTouchPoints eq 4 then
+				call @usr_check_message(sPRB_HOLE_Msg,(TRUE))
+				{nb, 'G65 P9814 D'PRB_DiamCirMsr }
+			elseif PRB_NumTouchPoints eq 3 then
+				call @usr_check_message(sPRB_HOLE_Msg_3point,(TRUE))
+				{nb, 'G65 P9823 D',PRB_DiamCirMsr, ' A30. B150. C-90.' }				
+			endif
+
+			skipline = false
+			
+			;czy jest Overtravel
+			call @usr_probe_overtravel
+			;czy mierzymy baze
+			call @usr_probe_workoffset
+			skipline = true
+		else
+			call @usr_check_message(sPRB_HOLE_Dim_ErrorMsg,(TRUE))
+		endif
+		
+	call @usr_PRB_X_Pos_Save
+	call @usr_PRB_Y_Pos_Save
+	call @usr_PRB_Size_Save
+	
+	;pomiar cylinder
+	elseif ProbeCycle eq 'PRB_CYLINDER' then
+			;sPRB_CYL_Msg_3point
+		;pomiar cylinder 4 pubkty
+		if PRB_NumTouchPoints eq 4 then
+		
+			call @usr_check_message(sPRB_CYL_Msg,(TRUE))
+			{nb, 'G65 P9814', ' D'PRB_DiamCirMsr, ' Z'PRB_CP_Z }
+		;pomiar cylinder 3 punkty	
+		elseif PRB_NumTouchPoints eq 3 then
+		
+			call @usr_check_message(sPRB_CYL_Msg_3point,(TRUE))
+			{nb, 'G65 P9823', ' D'PRB_DiamCirMsr, ' Z'PRB_CP_Z }
+			
+		endif
+		skipline = false
+		if PRB_RetractDist > 0 then
+			{' R'PRB_RetractDist }
+		endif
+		
+		;czy jest Overtravel
+		call @usr_probe_overtravel
+		;czy mierzymy baze
+		call @usr_probe_workoffset
+		skipline = true
+		
+	call @usr_PRB_X_Pos_Save
+	call @usr_PRB_Y_Pos_Save
+	call @usr_PRB_Size_Save
+	
+	
+	elseif ProbeCycle eq 'PRB_HOLE_BOSS' then
+				
+		;czy wiekszy od promienia kulki
+		if PRB_RetractDist > (tool_diameter/2) then
+			
+			if PRB_NumTouchPoints eq 4 then
+				call @usr_check_message(sPRB_HOLE_CYL_Msg,(TRUE))
+				{nb, 'G65 P9814', ' D'PRB_DiamCirMsr, ' Z'PRB_CP_Z, ' R-'(tool_diameter/2+PRB_HwB_Boss_offset)}
+			elseif PRB_NumTouchPoints eq 3 then
+				call @usr_check_message(sPRB_HOLE_CYL_Msg_3point,(TRUE))
+				{nb, 'G65 P9823', ' D'PRB_DiamCirMsr, ' Z'PRB_CP_Z, ' R-'(tool_diameter/2+PRB_HwB_Boss_offset)}			
+			endif
+		else
+			call @usr_check_message(sPRB_PB_Restrict_ErrorMsg,(TRUE))
+		endif
+		;czy jest Overtravel
+		call @usr_probe_overtravel
+		;czy mierzymy baze
+		call @usr_probe_workoffset
+		skipline = true
+	
+	call @usr_PRB_X_Pos_Save
+	call @usr_PRB_Y_Pos_Save
+	call @usr_PRB_Size_Save	
+		
+	endif
+
+
+	
+endp
+
+;znajdz naroznik
+@prb_cyc_cor
+
+	;przesuniecie sondy na pomiarowa glebokosc Z - posuw chroniony
+	{nb, 'G65 P9810 Z' PRB_CP_Z, ' F'Feed_rate}
+	
+				
+		;Pomiar
+		if ProbeCycle eq 'PRB_EXT_CORNER' then 
+			call @usr_check_message(sPRB_EXT_COR_Msg,(TRUE))
+			{nb,'G65 P9816 X' PRB_CP_X, ' Y' PRB_CP_Y}
+			
+			if xhpos > 0 and yhpos < 0 then
+				;lewy prawy naroznik 
+				iProbeAngleCorner = 1
+			elseif xhpos < 0 and yhpos < 0 then
+				iProbeAngleCorner = 2
+			elseif xhpos < 0 and yhpos > 0 then
+				iProbeAngleCorner = 3
+			elseif xhpos > 0 and yhpos > 0 then
+				iProbeAngleCorner = 4
+			endif
+			
+		elseif ProbeCycle eq 'PRB_INT_CORNER' then
+			call @usr_check_message(sPRB_INT_COR_Msg,(TRUE))		
+			{nb,'G65 P9815 X' PRB_CP_X, ' Y' PRB_CP_Y}
+			
+			if xhpos > 0 and yhpos < 0 then
+				;lewy prawy naroznik 
+				iProbeAngleCorner = 2
+			elseif xhpos < 0 and yhpos < 0 then
+				iProbeAngleCorner = 1
+			elseif xhpos < 0 and yhpos > 0 then
+				iProbeAngleCorner = 4
+			elseif xhpos > 0 and yhpos > 0 then
+				iProbeAngleCorner = 3
+			endif
+			
+		endif
+		if PRB_DX2 != 0 then
+			{' I' PRB_DX2}
+		endif
+		if PRB_DY2 != 0 then
+			{' J' PRB_DY2}
+		endif
+		;czy jest Overtravel
+		call @usr_probe_overtravel
+		;czy mierzymy baze
+		call @usr_probe_workoffset
+		skipline = true
+
+	
+	;wzgledem ktorego naroznika jest obrot
+	
+
+		
+	call @usr_PRB_X_Pos_Save
+	call @usr_PRB_Y_Pos_Save
+	call @usr_PRB_X_Angle_Save
+	call @usr_PRB_Y_Angle_Save
+	
+	nXrotPM = PRB_CP_X
+	nYrotPM = PRB_CP_Y	
+	
+endp
+
+@prb_cyc_angle
+		
+
+		local numeric distance distance_X distance_Y distance_Z
+		local string angle_char
+		if PRB_TP2_X < 0 and PRB_TP1_X < 0 then 
+					distance_X = abs(abs(PRB_TP2_X)-abs(PRB_TP1_X))
+		elseif PRB_TP2_X < 0 and PRB_TP1_X >= 0 then
+					distance_X = abs(PRB_TP2_X)+PRB_TP1_X
+		elseif PRB_TP2_X >= 0 and PRB_TP1_X < 0 then
+					distance_X = PRB_TP2_X+abs(PRB_TP1_X)
+		elseif PRB_TP2_X >= 0 and PRB_TP1_X >= 0 then
+					distance_X = abs(PRB_TP2_X-PRB_TP1_X)			
+		endif
+		
+		
+		if PRB_TP2_Y < 0 and PRB_TP1_Y < 0 then 
+				distance_Y = abs(abs(PRB_TP2_Y)-abs(PRB_TP1_Y))
+		elseif PRB_TP2_Y < 0 and PRB_TP1_Y >= 0 then
+				distance_Y = abs(PRB_TP2_Y)+PRB_TP1_Y
+		elseif PRB_TP2_Y >= 0 and PRB_TP1_Y < 0 then
+				distance_Y = PRB_TP2_Y+abs(PRB_TP1_Y)
+		elseif PRB_TP2_Y >= 0 and PRB_TP1_Y >= 0 then
+				distance_Y = abs(PRB_TP2_Y-PRB_TP1_Y)			
+		endif
+		
+		;Pomiar kata w osi X
+	    if ProbeCycle ne 'PRB_ANGLE_Z' then
+			zpos = PRB_TP1_Z
+			call @move_prb
+			if ProbeCycle eq 'PRB_ANGLE_Y' then
+				angle_char = 'I'
+				distance = distance_X
+				
+				call @usr_check_message(sPRB_Y_axis_Angle_Msg,(TRUE))
+			
+			elseif ProbeCycle eq 'PRB_ANGLE_X' then
+				angle_char = 'J'
+				distance = distance_Y
+				
+				call @usr_check_message(sPRB_X_axis_Angle_Msg,(TRUE))
+			endif
+		
+			{nb, 'G65 P7816 B'(PRB_RetractDist*PRB_Dir), ' 'angle_char, distance ' F'feed_rate}
+		
+		elseif ProbeCycle eq 'PRB_ANGLE_Z' then
+			;lProbeMoveBlock
+			xpos=PRB_TP1_X
+			zpos=PRB_TP1_Y
+			call @move_prb
+			{nb, 'G65 P9811 Z'PRB_TP1_Z}
+			call @usr_probe_overtravel
+			{nb, 'G65 P9834'}
+			xpos=PRB_TP2_X
+			zpos=PRB_TP2_Y
+			call @move_prb
+			if PRB_MeasurePlane eq 'YZ' then
+				distance = distance_X 
+			elseif PRB_MeasurePlane eq 'ZX' then
+				distance = distance_Y
+			endif
+
+			
+			if PRB_TP2_Z < 0 and PRB_TP1_Z < 0 then 
+					distance_Z = abs(abs(PRB_TP2_Z)-abs(PRB_TP1_Z))
+			elseif PRB_TP2_Z < 0 and PRB_TP1_Z >= 0 then
+					distance_Z = abs(PRB_TP2_Z)+PRB_TP1_Z
+			elseif PRB_TP2_Z >= 0 and PRB_TP1_Z < 0 then
+					distance_Z = PRB_TP2_Z+abs(PRB_TP1_Z)
+			elseif PRB_TP2_Z >= 0 and PRB_TP1_Z >= 0 then
+					distance_Z = abs(PRB_TP2_Z-PRB_TP1_Z)			
+			endif
+			
+			if PRB_TP1_Z > PRB_TP2_Z then
+				distance = distance*-1
+				distance_Z = distance_Z*-1
+			endif			
+			{nb, 'G65 P9811 Z'PRB_TP2_Z}
+			call @usr_probe_overtravel		
+			call @usr_check_message(sPRB_Z_axis_Angle_Msg,(TRUE))
+			{nb, 'G65 P9834 D'distance ' Z'distance_Z}
+			
+		endif
+		skipline = false
+		;czy jest Overtravel
+		call @usr_probe_overtravel
+		;czy mierzymy baze
+		call @usr_probe_workoffset
+		skipline = true
+		call @usr_PRB_X_Pos_Save
+		call @usr_PRB_Y_Pos_Save
+		call @usr_PRB_X_Angle_Save
+		call @usr_PRB_Y_Angle_Save
+	
+endp
